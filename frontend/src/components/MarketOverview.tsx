@@ -5,6 +5,8 @@ import { useRouter } from 'next/navigation';
 import { TrendingUp, TrendingDown, Activity, ArrowUpRight, ArrowDownRight } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+
 const MarketOverview = () => {
   const [stocks, setStocks] = useState([]);
   const [marketStats, setMarketStats] = useState({
@@ -42,8 +44,8 @@ const MarketOverview = () => {
       try {
         // Get both stocks and volatility data
         const [stocksResponse, volatilityResponse] = await Promise.all([
-          fetch('http://localhost:8000/api/stocks'),
-          fetch('http://localhost:8000/api/market-volatility')
+          fetch(`${API_URL}/api/stocks`),
+          fetch(`${API_URL}/api/market-volatility`)
         ]);
         
         const [stocksData, volatilityData] = await Promise.all([

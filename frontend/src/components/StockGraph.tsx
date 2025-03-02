@@ -3,7 +3,9 @@ import { useState, useEffect } from 'react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { CalendarIcon, TrophyIcon } from '@heroicons/react/24/outline'; // Add this import
+import { CalendarIcon, TrophyIcon } from '@heroicons/react/24/outline';
+
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
 interface StockGraphProps {
   stockId: string
@@ -92,7 +94,7 @@ const StockGraph = ({ stockId }: StockGraphProps) => {
       
       try {
         // Fetch champion info first
-        const championResponse = await fetch(`http://localhost:8000/api/stocks`);
+        const championResponse = await fetch(`${API_URL}/api/stocks`);
         const allStocks = await championResponse.json();
         const currentStock = allStocks.find((stock: any) => stock.player_tag === decodedId);
         
@@ -104,7 +106,7 @@ const StockGraph = ({ stockId }: StockGraphProps) => {
         }
         
         // Fetch stock data
-        const url = `http://localhost:8000/api/stocks/${properlyEncodedId}?period=${period}`;
+        const url = `${API_URL}/api/stocks/${properlyEncodedId}?period=${period}`;
         const response = await fetch(url);
         
         if (!response.ok) {
@@ -150,7 +152,7 @@ const StockGraph = ({ stockId }: StockGraphProps) => {
       const properlyEncodedId = encodeURIComponent(decodedId);
       
       try {
-        const url = `http://localhost:8000/api/stocks/${properlyEncodedId}/scores`;
+        const url = `${API_URL}/api/stocks/${properlyEncodedId}/scores`;
         const response = await fetch(url);
         
         if (!response.ok) {

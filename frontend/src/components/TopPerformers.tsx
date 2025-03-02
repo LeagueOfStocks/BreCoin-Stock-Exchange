@@ -4,13 +4,15 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+
 const TopPerformers = () => {
   const router = useRouter();
   const [performers, setPerformers] = useState({ top_performers: [], bottom_performers: [] });
   
   useEffect(() => {
     const fetchPerformers = async () => {
-      const response = await fetch('http://localhost:8000/api/top-performers');
+      const response = await fetch(`${API_URL}/api/top-performers`);
       const data = await response.json();
       setPerformers(data);
     };

@@ -5,6 +5,8 @@ import Link from 'next/link'
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
 import { ArrowTrendingUpIcon, ArrowTrendingDownIcon } from '@heroicons/react/24/solid'
 
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+
 interface Stock {
   player_tag: string
   champion: string
@@ -21,7 +23,7 @@ export default function GraphIndexPage() {
   useEffect(() => {
     const fetchStocks = async () => {
       try {
-        const response = await fetch('http://localhost:8000/api/stocks')
+        const response = await fetch(`${API_URL}/api/stocks`)
         if (!response.ok) throw new Error('Failed to fetch stocks')
         const data = await response.json()
         setStocks(data)
