@@ -1,14 +1,8 @@
 import requests
 import pandas as pd
-import sqlite3
 from datetime import datetime
 import joblib
 import time
-
-def adapt_datetime(dt):
-    return dt.isoformat()
-
-sqlite3.register_adapter(datetime, adapt_datetime)
 
 class PlayerStockTracker:
     def __init__(self, api_key):
@@ -55,61 +49,90 @@ class PlayerStockTracker:
         ]
 
     def init_database(self):
-        conn = sqlite3.connect('player_stocks.db')
-        c = conn.cursor()
+        # Check if tables exist and create them if they don't
+        from lib.database import get_connection
+        conn = get_connection()
         
-        # Create stock values table
-        c.execute('''
-            CREATE TABLE IF NOT EXISTS stock_values (
-                player_tag TEXT,
-                champion TEXT,
-                stock_value REAL,
-                model_score REAL,
-                timestamp DATETIME,
-                game_id TEXT,
-                PRIMARY KEY (player_tag, champion, timestamp)
-            )
-        ''')
-        
-        # Modify processed games table to use composite primary key
-        c.execute('''
-            CREATE TABLE IF NOT EXISTS processed_games (
-                game_id TEXT,
-                player_tag TEXT,
-                champion TEXT,
-                processed_date DATETIME,
-                PRIMARY KEY (game_id, player_tag, champion)
-            )
-        ''')
-        
-        conn.commit()
-        conn.close()
+        try:
+            with conn.cursor() as c:
+                # Check if stock_values table exists
+                c.execute("""
+                    SELECT EXISTS (
+                        SELECT FROM information_schema.tables 
+                        WHERE table_name = 'stock_values'
+                    )
+                """)
+                table_exists = c.fetchone()[0]
+                
+                if not table_exists:
+                    # Create stock values table
+                    c.execute('''
+                        CREATE TABLE stock_values (
+                            player_tag TEXT,
+                            champion TEXT,
+                            stock_value REAL,
+                            model_score REAL,
+                            timestamp TIMESTAMP,
+                            game_id TEXT,
+                            PRIMARY KEY (player_tag, champion, timestamp)
+                        )
+                    ''')
+                
+                # Check if processed_games table exists
+                c.execute("""
+                    SELECT EXISTS (
+                        SELECT FROM information_schema.tables 
+                        WHERE table_name = 'processed_games'
+                    )
+                """)
+                table_exists = c.fetchone()[0]
+                
+                if not table_exists:
+                    # Create processed games table
+                    c.execute('''
+                        CREATE TABLE processed_games (
+                            game_id TEXT,
+                            player_tag TEXT,
+                            champion TEXT,
+                            processed_date TIMESTAMP,
+                            PRIMARY KEY (game_id, player_tag, champion)
+                        )
+                    ''')
+                
+                conn.commit()
+        finally:
+            conn.close()
 
     def is_game_processed(self, game_id, player_tag, champion):
-        conn = sqlite3.connect('player_stocks.db')
-        c = conn.cursor()
+        from lib.database import get_connection
+        conn = get_connection()
         
-        c.execute('''
-            SELECT 1 FROM processed_games 
-            WHERE game_id = ? AND player_tag = ? AND champion = ?
-        ''', (game_id, player_tag, champion))
-        
-        result = c.fetchone()
-        conn.close()
-        
-        return result is not None
+        try:
+            with conn.cursor() as c:
+                c.execute('''
+                    SELECT 1 FROM processed_games 
+                    WHERE game_id = %s AND player_tag = %s AND champion = %s
+                ''', (game_id, player_tag, champion))
+                
+                result = c.fetchone()
+                return result is not None
+        finally:
+            conn.close()
 
     def mark_game_processed(self, game_id, player_tag, champion):
-        conn = sqlite3.connect('player_stocks.db')
-        c = conn.cursor()
+        from lib.database import get_connection
+        conn = get_connection()
         
-        c.execute('''
-            INSERT INTO processed_games (game_id, player_tag, champion, processed_date)
-            VALUES (?, ?, ?, ?)
-        ''', (game_id, player_tag, champion, datetime.now()))
-        
-        conn.commit()
-        conn.close()
+        try:
+            with conn.cursor() as c:
+                c.execute('''
+                    INSERT INTO processed_games (game_id, player_tag, champion, processed_date)
+                    VALUES (%s, %s, %s, %s)
+                ''', (game_id, player_tag, champion, datetime.now()))
+                
+                conn.commit()
+        finally:
+            conn.close()
 
     def get_puuid(self, player_tag):
         gameName, tagLine = player_tag.split('#')
@@ -148,6 +171,7 @@ class PlayerStockTracker:
             return None
 
     def calculate_metrics(self, match_data, puuid):
+        # Existing method unchanged
         if not match_data:
             return None
             
@@ -203,44 +227,53 @@ class PlayerStockTracker:
         return metrics
 
     def get_current_stock(self, player_tag, champion):
-        conn = sqlite3.connect('player_stocks.db')
-        c = conn.cursor()
+        from lib.database import get_connection
+        conn = get_connection()
         
-        c.execute('''
-            SELECT stock_value FROM stock_values 
-            WHERE player_tag = ? AND champion = ?
-            ORDER BY timestamp DESC LIMIT 1
-        ''', (player_tag, champion))
-        
-        result = c.fetchone()
-        conn.close()
-        
-        return result[0] if result else 10.0  # Default value
+        try:
+            with conn.cursor() as c:
+                c.execute('''
+                    SELECT stock_value FROM stock_values 
+                    WHERE player_tag = %s AND champion = %s
+                    ORDER BY timestamp DESC LIMIT 1
+                ''', (player_tag, champion))
+                
+                result = c.fetchone()
+                return result[0] if result else 10.0  # Default value
+        finally:
+            conn.close()
 
     def update_stock(self, player_tag, champion, new_value, model_score, game_id):
-        conn = sqlite3.connect('player_stocks.db')
-        c = conn.cursor()
+        from lib.database import get_connection
+        conn = get_connection()
         
-        c.execute('''
-            INSERT INTO stock_values (player_tag, champion, stock_value, model_score, timestamp, game_id)
-            VALUES (?, ?, ?, ?, ?, ?)
-        ''', (player_tag, champion, new_value, model_score, datetime.now(), game_id))
+        # Convert NumPy types to Python native types
+        if hasattr(new_value, 'item'):  # Check if it's a NumPy type
+            new_value = new_value.item()
         
-        conn.commit()
-        conn.close()
+        if hasattr(model_score, 'item'):  # Check if it's a NumPy type
+            model_score = model_score.item()
+        
+        try:
+            with conn.cursor() as c:
+                c.execute('''
+                    INSERT INTO stock_values (player_tag, champion, stock_value, model_score, timestamp, game_id)
+                    VALUES (%s, %s, %s, %s, %s, %s)
+                ''', (player_tag, champion, float(new_value), float(model_score), datetime.now(), game_id))
+                
+                conn.commit()
+        finally:
+            conn.close()
 
-    """
-    Calculate new stock value using Exponential Moving Average (EMA).
-    Alpha controls how much weight to give to recent scores vs historical prices.
-    Alpha of 0.4 means 40% weight to new score, 60% to historical prices.
-    """
     def calculate_new_stock(self, current_stock, model_score, alpha=0.4):
+        # Existing method unchanged
         adjustment = (model_score - 5) * 2
         raw_new_stock = current_stock + adjustment
         new_stock = alpha * raw_new_stock + (1 - alpha) * current_stock
         return max(0, new_stock)
 
     def run(self):
+        # Existing method unchanged
         # First, get PUUIDs for all players
         for player_tag in self.players:
             self.players[player_tag]['puuid'] = self.get_puuid(player_tag)
