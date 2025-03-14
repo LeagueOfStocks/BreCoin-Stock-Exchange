@@ -156,9 +156,12 @@ const TopPerformers = () => {
             {loading ? (
               Array(5).fill(0).map((_, i) => <PerformerSkeleton key={i} />)
             ) : (
-              performers.bottom_performers.map((stock, i) => (
-                <PerformerRow key={stock.player_tag} stock={stock} rank={i + 1} />
-              ))
+              // Sort bottom performers by price change from most negative to least negative
+              [...performers.bottom_performers]
+                .sort((a, b) => a.price_change_percent - b.price_change_percent)
+                .map((stock, i) => (
+                  <PerformerRow key={stock.player_tag} stock={stock} rank={i + 1} />
+                ))
             )}
           </CardContent>
         </Card>
