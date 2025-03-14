@@ -24,7 +24,7 @@ class PlayerStockTracker:
             "Wasiio#NA1": {"champion": "Yasuo", "puuid": None},
             "theultimateace1#001": {"champion": "Anivia", "puuid": None},
             "Waddłes#NA1": {"champion": "Xerath", "puuid": None},
-            "Hardfeat#1048": {"champion": "Nunu", "puuid": None},
+            "Hardfeat#1048": {"champion": "Malphite", "puuid": None},
             "ProbablyCheating#NA1": {"champion": "Jhin", "puuid": None},
             "Valyrian#NA2": {"champion": "Illaoi", "puuid": None},
             "SerBlackFish#TDF": {"champion": "Illaoi", "puuid": None},
