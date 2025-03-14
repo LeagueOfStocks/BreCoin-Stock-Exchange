@@ -297,6 +297,21 @@ class PlayerStockTracker:
             if not match_data:
                 continue
 
+            # Map queue IDs to game types
+            queue_to_game_type = {
+                400: "NORMAL_DRAFT_5x5",
+                420: "RANKED_SOLO_5x5",
+                440: "RANKED_FLEX_SR",
+                700: "CLASH"
+            }
+
+            queue_id = match_data['info'].get('queueId', 0)
+            game_type = queue_to_game_type.get(queue_id)
+
+            if not game_type or game_type not in self.valid_game_types:
+                print(f"\nSkipping game {match_id} - invalid game type: Queue ID {queue_id}")
+                continue
+
             # Get all participants in this game
             participants = match_data['info']['participants']
             
