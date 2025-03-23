@@ -29,7 +29,7 @@ class PlayerStockTracker:
             "Valyrian#NA2": {"champion": "Viktor", "puuid": None},
             "SerBlackFish#TDF": {"champion": "Illaoi", "puuid": None},
             "Pabby032#NA1": {"champion": "Velkoz", "puuid": None}, 
-            "soulcrucker49#NA1": {"champion": "Taric", "puuid": None},
+            "soulcrucher49#NA1": {"champion": "Taric", "puuid": None},
         }
         
         # Role mapping
