@@ -31,6 +31,8 @@ class PlayerStockTracker:
             "Pabby032#NA1": {"champion": "Velkoz", "puuid": None}, 
             "soulcrucher49#NA1": {"champion": "Taric", "puuid": None},
             "DuMistGeburt#NA1": {"champion": "Veigar", "puuid": None},
+            "Chocolate Kid#NA1": {"champion": "Vayne", "puuid": None},
+            "CarryPuttar#NA1": {"champion": "Shaco", "puuid": None},
         }
         
         # Role mapping
