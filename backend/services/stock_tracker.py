@@ -3,6 +3,11 @@ import pandas as pd
 from datetime import datetime
 import joblib
 import time
+import sys
+import os
+
+# Add current directory to Python path
+sys.path.append('.')  # This makes Python look in the backend folder
 
 class PlayerStockTracker:
     def __init__(self, api_key):
