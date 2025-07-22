@@ -47,7 +47,7 @@ class PlayerStockTracker:
             "Hardfeat#1048": {"champion": "Nunu", "puuid": None},
             "ProbablyCheating#NA1": {"champion": "Jhin", "puuid": None},
             "SerBlackFish#TDF": {"champion": "Illaoi", "puuid": None},
-            "Pabby032#NA1": {"champion": "Vel'Koz", "puuid": None}, 
+            "Pabby032#NA1": {"champion": "Velkoz", "puuid": None}, 
             "soulcrucher49#NA1": {"champion": "Taric", "puuid": None},
             "DuMistGeburt#NA1": {"champion": "Veigar", "puuid": None},
             "Chocolate Kid#NA1": {"champion": "Vayne", "puuid": None},
