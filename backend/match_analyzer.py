@@ -130,7 +130,7 @@ if __name__ == "__main__":
     analyzer = MatchAnalyzer()
     
     MATCH_ID = "NA1_5247080655"  
-    SUMMONER_NAME = "ProbablyCheating#NA1"  
+    SUMMONER_NAME = "M K#vivi"  
     
     result = analyzer.get_match_data(MATCH_ID, SUMMONER_NAME)
     
