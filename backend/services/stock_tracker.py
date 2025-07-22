@@ -39,15 +39,15 @@ class PlayerStockTracker:
         
         # Player-champion mapping (unchanged)
         self.players = {
-            "Valyrian#NA2": {"champion": "Pantheon", "puuid": None},
-            "Maqmood#8397": {"champion": "Morgana", "puuid": None},
-            "Wasiio#NA1": {"champion": "Caitlyn", "puuid": None},
+            "Valyrian#NA2": {"champion": "Viktor", "puuid": None},
+            "Maqmood#8397": {"champion": "Camille", "puuid": None},
+            "Wasiio#NA1": {"champion": "Yasuo", "puuid": None},
             "theultimateace1#001": {"champion": "Anivia", "puuid": None},
             "Waddłes#NA1": {"champion": "Xerath", "puuid": None},
             "Hardfeat#1048": {"champion": "Nunu", "puuid": None},
             "ProbablyCheating#NA1": {"champion": "Jhin", "puuid": None},
             "SerBlackFish#TDF": {"champion": "Illaoi", "puuid": None},
-            "Pabby032#NA1": {"champion": "Darius", "puuid": None}, 
+            "Pabby032#NA1": {"champion": "Vel'Koz", "puuid": None}, 
             "soulcrucher49#NA1": {"champion": "Taric", "puuid": None},
             "DuMistGeburt#NA1": {"champion": "Veigar", "puuid": None},
             "Chocolate Kid#NA1": {"champion": "Vayne", "puuid": None},
