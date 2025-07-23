@@ -52,6 +52,7 @@ class PlayerStockTracker:
             "DuMistGeburt#NA1": {"champion": "Veigar", "puuid": None},
             "Chocolate Kid#NA1": {"champion": "Vayne", "puuid": None},
             "CarryPuttar#NA1": {"champion": "Shaco", "puuid": None},
+            "Clarkyclarker#NA1": {"champion": "Evelynn", "puuid": None},
         }
         
         # --- NEW: Mapping from Riot's API role names to our model keys ---
