@@ -3,12 +3,13 @@
 import { useState } from 'react'
 import { supabase } from '@/utils/supabase'
 import { useRouter } from 'next/navigation'
-import { Card, CardHeader, CardTitle, CardContent, CardDescription } from '@/components/ui/card'
+import Link from 'next/link' // <-- IMPORT LINK
+import { Card, CardHeader, CardTitle, CardContent, CardDescription, CardFooter } from '@/components/ui/card' // <-- IMPORT CARDFOOTER
 import { Label } from '@/components/ui/label'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { FaGoogle, FaDiscord, FaTwitch } from 'react-icons/fa'
-import type { Provider } from '@supabase/supabase-js' // Import the Provider type
+import type { Provider } from '@supabase/supabase-js'
 
 export default function LoginPage() {
   const [email, setEmail] = useState<string>('')
@@ -17,7 +18,6 @@ export default function LoginPage() {
   const [loading, setLoading] = useState<boolean>(false)
   const router = useRouter()
 
-  // Type the form event
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault()
     setLoading(true)
@@ -33,7 +33,6 @@ export default function LoginPage() {
     }
   }
 
-  // Use the official Provider type for social logins
   const handleSocialLogin = async (provider: Provider) => {
     setLoading(true)
     setError(null)
@@ -78,7 +77,7 @@ export default function LoginPage() {
             </div>
             <div className="space-y-2">
               <Label htmlFor="password">Password</Label>
-              <Input id="password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} required />
+              <Input id="password" type="password" placeholder="••••••••" value={password} onChange={(e) => setPassword(e.target.value)} required />
             </div>
             {error && <p className="text-red-500 text-sm">{error}</p>}
             <Button type="submit" className="w-full" disabled={loading}>
@@ -86,6 +85,14 @@ export default function LoginPage() {
             </Button>
           </form>
         </CardContent>
+        <CardFooter className="flex justify-center">
+          <p className="text-sm text-muted-foreground">
+            Don't have an account?{' '}
+            <Link href="/signup" className="text-primary hover:underline font-semibold">
+              Sign Up
+            </Link>
+          </p>
+        </CardFooter>
       </Card>
     </div>
   )
