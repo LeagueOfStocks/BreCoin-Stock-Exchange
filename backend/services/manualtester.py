@@ -8,12 +8,9 @@ FEATURE_ORDER = [
     'kda', 'dmg_to_champions_per_min', 'team_damage_share', 'team_gold_share',
     'gold_diff_15', 'exp_diff_15', 'kill_participation',
     'objective_damage_per_min', 'team_objective_damage_share',
-    'vision_score_per_min', 'team_vision_score_share',
+    'vision_score_per_min', 'team_vision_score_share', 'gold_diff_per_min', 'exp_diff_per_min',
     'damage_taken_per_min', 'damage_taken_share',
-    'healing_shielding_allies_per_min',
-    'gold_diff_per_min',
-    'exp_diff_per_min',
-    'win_loss'
+    'healing_shielding_allies_per_min','win_loss'
 ]
 
 def load_models():
