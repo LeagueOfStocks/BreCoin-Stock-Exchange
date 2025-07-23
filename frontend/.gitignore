@@ -1,6 +1,21 @@
-# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
+# =========================
+# Environment & Secrets
+# =========================
+# Ignore ALL environment files and security certificates.
+# These are managed on the hosting platforms (Vercel, Render).
+.env*
+*.pem
 
-# dependencies
+# =========================
+# General / OS Files
+# =========================
+.DS_Store
+Thumbs.db
+
+# =========================
+# Frontend - Next.js (Vercel)
+# =========================
+# Dependencies
 /node_modules
 /.pnp
 .pnp.*
@@ -10,32 +25,58 @@
 !.yarn/releases
 !.yarn/versions
 
-# testing
-/coverage
-
-# next.js
+# Build output & Caches
 /.next/
 /out/
-
-# production
 /build
+*.tsbuildinfo
 
-# misc
-.DS_Store
-*.pem
+# Auto-generated files
+next-env.d.ts
 
-# debug
+# Deployment-specific
+.vercel
+
+# =========================
+# Backend - Python (Render)
+# =========================
+# Python virtual environment
+.venv
+venv
+env
+
+# Python bytecode and caches
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Distribution / packaging
+.Python
+/dist/
+/eggs/
+.eggs/
+*.egg-info/
+*.egg
+*.manifest
+*.spec
+
+# =========================
+# Testing & Debugging
+# =========================
+/coverage
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 
-# env files (can opt-in for committing if needed)
-.env*
-
-# vercel
-.vercel
-
-# typescript
-*.tsbuildinfo
-next-env.d.ts
+# =========================
+# IDE / Editor Files
+# =========================
+.idea/
+.vscode/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.swp

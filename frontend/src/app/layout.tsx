@@ -1,15 +1,16 @@
-import type { Metadata } from 'next'
 import { Inter } from 'next/font/google'
 import Navigation from '@/components/Navigation'
 import './globals.css'
+import { AuthProvider } from './context/AuthContext'
 
 const inter = Inter({ subsets: ['latin'] })
 
-export const metadata: Metadata = {
+export const metadata = {
   title: 'Stock Market Tracker',
   description: 'Track player performance stocks',
 }
 
+// Add the type for the props object
 export default function RootLayout({
   children,
 }: {
@@ -18,10 +19,12 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className={inter.className}>
-        <Navigation />
-        <main className="max-w-7xl mx-auto p-4">
-          {children}
-        </main>
+        <AuthProvider>
+          <Navigation />
+          <main className="max-w-7xl mx-auto p-4">
+            {children}
+          </main>
+        </AuthProvider>
       </body>
     </html>
   )
