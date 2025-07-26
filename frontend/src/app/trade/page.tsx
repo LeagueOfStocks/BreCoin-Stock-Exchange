@@ -39,7 +39,7 @@ export default function TradePage() {
     setLoading(true)
 
     const fetchInitialData = async () => {
-      const { data: stocksData } = await supabase.from('stocks').select('*')
+      const { data: stocksData } = await supabase.from('current_stock_prices').select('*')
       const { data: profileData } = await supabase.from('profiles').select('gold').eq('id', user.id).single()
 
       if (stocksData) setStocks(stocksData as Stock[])

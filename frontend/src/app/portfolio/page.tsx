@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { supabase } from '@/utils/supabase'
-import { useAuth } from '@/app/context/AuthContext'
+import { useAuth } from '@/app/context/AuthContext' // Corrected the import path
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from '@/components/ui/card'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -15,6 +15,7 @@ interface Holding {
 }
 
 interface Transaction {
+  id: number; // Added for a unique key
   created_at: string;
   transaction_type: 'BUY' | 'SELL';
   player_tag: string;
@@ -32,27 +33,53 @@ export default function PortfolioPage() {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    if (!user) return
+    // This function will only run if a user is logged in.
+    if (!user) {
+        setLoading(false);
+        return;
+    }
 
     const fetchData = async () => {
-      setLoading(true)
+      setLoading(true);
+
+      console.log("--- STARTING PORTFOLIO DATA FETCH for user:", user.id); // Debug Log
 
       // Fetch user's gold from their profile
       const { data: profileData, error: profileError } = await supabase
         .from('profiles')
         .select('gold')
         .eq('id', user.id)
-        .single()
+        .single(); // .single() is important, it expects only one row
       
-      if (profileData) setGold(profileData.gold)
+      // --- This is the debugging block ---
+      console.log("Response from 'profiles' table:", { 
+        data: profileData, 
+        error: profileError 
+      });
+      // ------------------------------------
+      
+      if (profileData) {
+        setGold(profileData.gold);
+      } else {
+        // This handles the case where the profile might not be found or an error occurred.
+        setGold(0);
+        if (profileError) {
+          console.error("Error fetching profile:", profileError.message);
+        }
+      }
 
       // Fetch current holdings from our portfolio VIEW
       const { data: holdingsData, error: holdingsError } = await supabase
         .from('portfolio_view')
         .select('*')
-        .eq('user_id', user.id)
+        .eq('user_id', user.id);
 
-      if (holdingsData) setHoldings(holdingsData)
+      if (holdingsData) {
+        setHoldings(holdingsData);
+      }
+      if (holdingsError) {
+        console.error("Error fetching holdings:", holdingsError.message);
+      }
 
       // Fetch the last 10 transactions
       const { data: transactionsData, error: transactionsError } = await supabase
@@ -60,23 +87,38 @@ export default function PortfolioPage() {
         .select('*')
         .eq('user_id', user.id)
         .order('created_at', { ascending: false })
-        .limit(10)
+        .limit(10);
 
-      if (transactionsData) setTransactions(transactionsData as Transaction[])
+      if (transactionsData) {
+        setTransactions(transactionsData as Transaction[]);
+      }
+      if (transactionsError) {
+        console.error("Error fetching transactions:", transactionsError.message);
+      }
 
-      setLoading(false)
+      setLoading(false);
     }
 
-    fetchData()
-  }, [user])
+    fetchData();
+  }, [user]); // The effect depends on the user object
 
+  // This handles the initial loading state
   if (loading) {
     return (
-      <div className="space-y-6">
+      <div className="space-y-6 p-4 md:p-8">
         <Skeleton className="h-24 w-full" />
         <Skeleton className="h-64 w-full" />
         <Skeleton className="h-64 w-full" />
       </div>
+    );
+  }
+
+  // This handles the case where a user is not logged in after loading has finished
+  if (!user) {
+    return (
+        <div className="text-center p-8">
+            <p>Please log in to view your portfolio.</p>
+        </div>
     )
   }
 
@@ -98,7 +140,7 @@ export default function PortfolioPage() {
             <p className="text-2xl font-bold">{gold.toFixed(2)} Gold</p>
           </CardContent>
         </Card>
-        {/* We will add Portfolio Value and P/L cards here later once we calculate them */}
+        {/* We will add Portfolio Value and P/L cards here later */}
       </div>
 
       {/* Holdings Table */}
@@ -111,8 +153,7 @@ export default function PortfolioPage() {
             <TableHeader>
               <TableRow>
                 <TableHead>Stock</TableHead>
-                <TableHead className="text-right">Shares</TableHead>
-                {/* We'll add more columns like Market Value later */}
+                <TableHead className="text-right">Shares Held</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -128,7 +169,9 @@ export default function PortfolioPage() {
                 ))
               ) : (
                 <TableRow>
-                  <TableCell colSpan={2} className="text-center">You do not currently hold any stocks.</TableCell>
+                  <TableCell colSpan={2} className="text-center py-8 text-muted-foreground">
+                    You do not currently hold any stocks.
+                  </TableCell>
                 </TableRow>
               )}
             </TableBody>
@@ -156,10 +199,10 @@ export default function PortfolioPage() {
             <TableBody>
               {transactions.length > 0 ? (
                 transactions.map((tx) => (
-                  <TableRow key={tx.created_at}>
+                  <TableRow key={tx.id}>
                     <TableCell>{new Date(tx.created_at).toLocaleString()}</TableCell>
                     <TableCell>
-                      <span className={tx.transaction_type === 'BUY' ? 'text-green-500' : 'text-red-500'}>
+                      <span className={`font-semibold ${tx.transaction_type === 'BUY' ? 'text-green-600' : 'text-red-600'}`}>
                         {tx.transaction_type}
                       </span>
                     </TableCell>
@@ -171,7 +214,9 @@ export default function PortfolioPage() {
                 ))
               ) : (
                 <TableRow>
-                  <TableCell colSpan={6} className="text-center">You have no transaction history.</TableCell>
+                  <TableCell colSpan={6} className="text-center py-8 text-muted-foreground">
+                    You have no transaction history.
+                  </TableCell>
                 </TableRow>
               )}
             </TableBody>
@@ -179,5 +224,5 @@ export default function PortfolioPage() {
         </CardContent>
       </Card>
     </div>
-  )
+  );
 }
