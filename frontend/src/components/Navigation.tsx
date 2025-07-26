@@ -7,8 +7,15 @@ import { Button } from '@/components/ui/button'
 
 const Navigation = () => {
   const pathname = usePathname()
-  // Thanks to TypeScript, 'user' and 'signOut' have proper types here automatically
   const { user, signOut } = useAuth()
+
+  // Helper function for nav link classes to avoid repetition
+  const getLinkClassName = (path: string, isPrefix: boolean = false) => {
+    const isActive = isPrefix ? pathname.startsWith(path) : pathname === path;
+    return `inline-flex items-center px-4 py-2 transition-all duration-300 relative group ${
+      isActive ? 'text-blue-600 font-medium' : 'text-gray-600'
+    }`;
+  };
 
   return (
     <nav className="bg-white shadow mb-4">
@@ -17,15 +24,23 @@ const Navigation = () => {
           <div className="flex">
             {user && (
               <>
-                <Link href="/" className={`inline-flex items-center px-4 py-2 transition-all duration-200 relative group ${pathname === '/' ? 'text-blue-600 font-medium' : 'text-gray-600'}`}>
+                <Link href="/" className={getLinkClassName('/')}>
                   Market Overview
                   <span className="absolute bottom-0 left-0 w-0 h-0.5 bg-blue-500 group-hover:w-full transition-all duration-300"/>
                 </Link>
-                <Link href="/graph" className={`inline-flex items-center px-4 py-2 transition-all duration-300 relative group ${pathname.startsWith('/graph') ? 'text-blue-600 font-medium' : 'text-gray-600'}`}>
+                <Link href="/trade" className={getLinkClassName('/trade')}>
+                  Trade
+                  <span className="absolute bottom-0 left-0 w-0 h-0.5 bg-blue-500 group-hover:w-full transition-all duration-300"/>
+                </Link>
+                <Link href="/portfolio" className={getLinkClassName('/portfolio')}>
+                  Portfolio
+                  <span className="absolute bottom-0 left-0 w-0 h-0.5 bg-blue-500 group-hover:w-full transition-all duration-300"/>
+                </Link>
+                <Link href="/graph" className={getLinkClassName('/graph', true)}>
                   Graphs
                   <span className="absolute bottom-0 left-0 w-0 h-0.5 bg-blue-500 group-hover:w-full transition-all duration-300"/>
                 </Link>
-                <Link href="/top" className={`inline-flex items-center px-4 py-2 transition-all duration-300 relative group ${pathname === '/top' ? 'text-blue-600 font-medium' : 'text-gray-600'}`}>
+                <Link href="/top" className={getLinkClassName('/top')}>
                   Top Performers
                   <span className="absolute bottom-0 left-0 w-0 h-0.5 bg-blue-500 group-hover:w-full transition-all duration-300"/>
                 </Link>
@@ -36,6 +51,7 @@ const Navigation = () => {
             {user ? (
               <Button variant="outline" onClick={signOut}>Logout</Button>
             ) : (
+                // Only show login button if not already on the login page
                 pathname !== '/login' && <Link href="/login"><Button>Login</Button></Link>
             )}
           </div>

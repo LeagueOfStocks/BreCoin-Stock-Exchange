@@ -1,16 +1,17 @@
+import type { Metadata } from 'next'
 import { Inter } from 'next/font/google'
 import Navigation from '@/components/Navigation'
-import './globals.css'
 import { AuthProvider } from './context/AuthContext'
+import { Toaster } from "@/components/ui/toaster" // <-- IMPORT THE TOASTER
+import './globals.css'
 
 const inter = Inter({ subsets: ['latin'] })
 
-export const metadata = {
+export const metadata: Metadata = {
   title: 'Stock Market Tracker',
   description: 'Track player performance stocks',
 }
 
-// Add the type for the props object
 export default function RootLayout({
   children,
 }: {
@@ -24,6 +25,7 @@ export default function RootLayout({
           <main className="max-w-7xl mx-auto p-4">
             {children}
           </main>
+          <Toaster /> {/* <-- ADD THE TOASTER COMPONENT HERE, AT THE END */}
         </AuthProvider>
       </body>
     </html>
