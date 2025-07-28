@@ -122,21 +122,19 @@ const MarketOverview = () => {
       {/* --- NEW: Page Header with Refresh Button --- */}
       <div className="flex justify-between items-center">
         <div>
-            <h1 className="text-2xl font-bold">Market Overview: {currentMarket.name}</h1>
-            {marketStats.lastRefreshed && (
-                <p className="text-sm text-muted-foreground">
-                    Last updated: {new Date(marketStats.lastRefreshed).toLocaleString()}
-                </p>
-            )}
+          <h1 className="text-2xl font-bold">Market Overview: {currentMarket.name}</h1>
+          {marketStats.lastRefreshed && (
+            <p className="text-sm text-muted-foreground">
+              Last updated: {new Date(marketStats.lastRefreshed).toLocaleString()}
+            </p>
+          )}
         </div>
         <Button onClick={handleRefresh} disabled={isRefreshing}>
-            <RefreshCw className={`mr-2 h-4 w-4 ${isRefreshing ? 'animate-spin' : ''}`} />
-            {isRefreshing ? 'Refreshing...' : 'Refresh Prices'}
+          <RefreshCw className={`mr-2 h-4 w-4 ${isRefreshing ? 'animate-spin' : ''}`} />
+          {isRefreshing ? 'Refreshing...' : 'Refresh Prices'}
         </Button>
       </div>
 
-  return (
-    <div className="space-y-6">
       {/* Market Summary Cards */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <Card>
