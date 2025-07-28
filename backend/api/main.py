@@ -25,7 +25,16 @@ APP_BASE_URL = os.getenv("APP_BASE_URL")
 
 # --- App Setup ---
 load_dotenv()
+from fastapi.routing import APIRouter
+
+# Create a router that is not strict about trailing slashes
+router = APIRouter(strict_slashes=False)
+# Pass this router into the FastAPI constructor
 app = FastAPI()
+
+# Mount the router to the app
+app.include_router(router)
+
 
 
 app.add_middleware(
