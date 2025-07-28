@@ -31,7 +31,8 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     
     getSession()
 
-    const { data: subscription } = supabase.auth.onAuthStateChange(
+    // Correctly destructure the subscription object
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
       (event, session) => {
         setUser(session?.user ?? null)
         setLoading(false)
@@ -41,8 +42,9 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       }
     )
 
+    // Use the unsubscribe method on the subscription object
     return () => {
-      subscription?.unsubscribe()
+      subscription.unsubscribe()
     }
   }, [router])
 

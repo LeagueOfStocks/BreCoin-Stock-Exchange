@@ -3,11 +3,11 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { useMarket } from '@/app/context/MarketContext';
-import { TrendingUp, Activity, ArrowUpRight, ArrowDownRight, RefreshCw } from 'lucide-react'; // Import RefreshCw icon
+import { TrendingUp, Activity, ArrowUpRight, ArrowDownRight, RefreshCw } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Button } from '@/components/ui/button'; // Import Button
-import { useToast } from '@/hooks/use-toast'; // Import useToast for feedback
+import { Button } from '@/components/ui/button';
+import { useToast } from '@/hooks/use-toast';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
@@ -25,18 +25,35 @@ interface Stock {
 const MarketOverview = () => {
   const { currentMarket } = useMarket();
   const { toast } = useToast();
+  const router = useRouter();
+  
   const [stocks, setStocks] = useState<Stock[]>([]);
   const [marketStats, setMarketStats] = useState({
     totalValue: 0,
     topGainer: null as Stock | null,
     volatilityIndex: 0,
-    lastRefreshed: null as string | null, // State to hold the last refresh time
+    lastRefreshed: null as string | null,
   });
   const [loading, setLoading] = useState(true);
-  const [isRefreshing, setIsRefreshing] = useState(false); // State for the refresh button
-  const router = useRouter();
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
-  // We wrap fetchData in useCallback to keep its identity stable
+  // --- VOLATILITY HELPER FUNCTIONS (NOW CORRECTLY INCLUDED) ---
+  const getVolatilityColor = (volatility: number): string => {
+    if (volatility < 1.5) return 'text-green-500';
+    if (volatility < 3.0) return 'text-yellow-500';
+    if (volatility < 5.0) return 'text-orange-500';
+    return 'text-red-500';
+  };
+
+  const calculateVolatility = (stockData: Stock[]): number => {
+    if (!stockData || stockData.length < 2) return 0;
+    const absoluteDailyChanges = stockData.map(stock => Math.abs(stock.price_change_24h));
+    const mean = absoluteDailyChanges.reduce((sum, change) => sum + change, 0) / absoluteDailyChanges.length;
+    const variance = absoluteDailyChanges.reduce((sum, change) => sum + Math.pow(change - mean, 2), 0) / absoluteDailyChanges.length;
+    return Math.sqrt(variance); // Return standard deviation as the volatility index
+  };
+  
+  // --- DATA FETCHING ---
   const fetchData = useCallback(async () => {
     if (!currentMarket) {
         setLoading(false);
@@ -55,12 +72,14 @@ const MarketOverview = () => {
         const topGainer = stocksData.reduce((prev, curr) => 
           (curr.price_change_percent_24h > (prev?.price_change_percent_24h || -Infinity)) ? curr : prev, null);
         
-        // Find the most recent update timestamp from all stocks
         const lastRefreshed = stocksData.length > 0 
             ? stocksData.reduce((latest, stock) => new Date(stock.last_update) > new Date(latest) ? stock.last_update : latest, stocksData[0].last_update)
             : null;
+        
+        const volatility = calculateVolatility(stocksData);
             
-        setMarketStats({ totalValue, topGainer, volatilityIndex: 0, lastRefreshed });
+        setMarketStats({ totalValue, topGainer, lastRefreshed, volatilityIndex: volatility });
+
     } catch (error) {
         console.error('Error fetching market overview data:', error);
         setStocks([]);
@@ -75,7 +94,6 @@ const MarketOverview = () => {
     return () => clearInterval(interval);
   }, [fetchData]);
   
-  // --- NEW: Function to handle the refresh button click ---
   const handleRefresh = async () => {
     if (!currentMarket) return;
     setIsRefreshing(true);
@@ -88,7 +106,7 @@ const MarketOverview = () => {
         
         toast({
             title: "Refresh Initiated",
-            description: "Stock prices are being updated in the background. The page will refresh with new data shortly.",
+            description: "Stock prices are being updated. New data will appear shortly.",
         });
     } catch (error: any) {
         toast({
@@ -100,7 +118,6 @@ const MarketOverview = () => {
         setIsRefreshing(false);
     }
   };
-
 
   if (loading) {
     return <div className="space-y-6"><Skeleton className="h-28 w-full" /><Skeleton className="h-96 w-full" /></div>
@@ -170,7 +187,7 @@ const MarketOverview = () => {
           </CardHeader>
           <CardContent>
             <div className={`text-2xl font-bold ${getVolatilityColor(marketStats.volatilityIndex)}`}>
-              {marketStats.volatilityIndex.toFixed(1)}
+              {marketStats.volatilityIndex.toFixed(2)}
             </div>
             <p className="text-xs text-muted-foreground">Based on 24h price swings</p>
           </CardContent>
