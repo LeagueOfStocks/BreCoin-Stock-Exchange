@@ -1,22 +1,37 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, status, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
-from apscheduler.schedulers.background import BackgroundScheduler
-from services.stock_tracker import PlayerStockTracker
-from datetime import datetime, timedelta
-import time
+from pydantic import BaseModel
+from datetime import datetime, timedelta, timezone
 import os
 from dotenv import load_dotenv
+from lib.database import get_dict_connection
+import requests
+from services.stock_tracker import PlayerStockTracker
+import random
+import string
+import hmac
+import hashlib
+import base64
 
-# Load environment variables from .env file
+# --- Get all QStash keys from environment ---
+QSTASH_TOKEN = os.getenv("QSTASH_TOKEN")
+QSTASH_CURRENT_SIGNING_KEY = os.getenv("QSTASH_CURRENT_SIGNING_KEY")
+QSTASH_NEXT_SIGNING_KEY = os.getenv("QSTASH_NEXT_SIGNING_KEY")
+# This is the URL of our own deployed application
+# You MUST set this in your .env file and on Render
+# e.g., APP_BASE_URL=https://brecoin-backend.onrender.com
+APP_BASE_URL = os.getenv("APP_BASE_URL")
+
+
+# --- App Setup ---
 load_dotenv()
-
 app = FastAPI()
 
-# Configure CORS
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:3000", "https://brecoin-stock-exchange.vercel.app"],
-     allow_credentials=True,
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -25,250 +40,401 @@ app.add_middleware(
 API_KEY = os.getenv("RIOT_API_KEY")
 tracker = PlayerStockTracker(API_KEY)
 
-# Schedule updates
-scheduler = BackgroundScheduler()
-scheduler.add_job(tracker.run, 'interval', minutes=2)
-scheduler.start()
+# Asynchronous startup event to load ML models into memory once
+@app.on_event("startup")
+async def startup_event():
+    # We now call the async version of the model loader
+    await tracker.load_models_async()
 
-@app.get("/api/stocks")
-async def get_stocks():
-    """Get all current stock prices and changes"""
-    from lib.database import get_dict_connection
-    conn = get_dict_connection()
+async def verify_qstash_signature(request: Request):
+    """
+    Verifies that the incoming request is genuinely from QStash by checking
+    against both the current and next signing keys.
+    """
+    signature = request.headers.get("Upstash-Signature")
+    if not signature:
+        raise HTTPException(status_code=401, detail="Signature header is missing")
+
+    body = await request.body()
     
+    # Try verifying with the current key first
+    h_current = hmac.new(QSTASH_CURRENT_SIGNING_KEY.encode(), body, hashlib.sha256)
+    expected_current = base64.b64encode(h_current.digest()).decode()
+    if hmac.compare_digest(expected_current, signature):
+        return True # Verification successful
+
+    # If that fails, try the next key
+    h_next = hmac.new(QSTASH_NEXT_SIGNING_KEY.encode(), body, hashlib.sha256)
+    expected_next = base64.b64encode(h_next.digest()).decode()
+    if hmac.compare_digest(expected_next, signature):
+        return True # Verification successful
+
+    # If both fail, the signature is invalid
+    raise HTTPException(status_code=401, detail="Invalid signature")
+
+
+# --- Helper Functions ---
+def _generate_invite_code(length=8):
+    """Generates a simple random alphanumeric code."""
+    return ''.join(random.choices(string.ascii_uppercase + string.digits, k=length))
+
+# --- Models for request bodies (Pydantic) ---
+class MarketCreate(BaseModel):
+    name: str
+    creator_id: str
+
+class MarketJoin(BaseModel):
+    invite_code: str
+    user_id: str
+
+class PlayerAdd(BaseModel):
+    player_tag: str
+    user_id: str
+    initial_champion: str # <-- ADD THIS LINE
+
+class ChampionAdd(BaseModel):
+    champion_name: str
+
+# --- API Endpoints ---
+@app.post("/api/tasks/update-market", status_code=status.HTTP_202_ACCEPTED)
+async def task_update_market(payload: dict, _=Depends(verify_qstash_signature)):
+    """
+    This is the secure webhook that QStash calls to execute the job.
+    It runs the tracker logic directly.
+    """
+    market_id = payload.get("market_id")
+    if not market_id:
+        raise HTTPException(status_code=400, detail="market_id missing from payload")
+    
+    print(f"QStash task received for market {market_id}")
+    # We can run this directly because Render's Uvicorn server can handle
+    # long-running async tasks on its own worker threads.
+    await tracker.update_market_stocks(market_id)
+    return {"status": "success", "message": f"Task for market {market_id} completed."}
+
+
+# --- USER-FACING Refresh Endpoint (This calls QStash) ---
+@app.post("/api/markets/{market_id}/refresh")
+async def refresh_market(market_id: int):
+    """
+    Triggers a stock update for a market by dispatching a task to QStash.
+    """
+    # ... (Your cooldown logic remains here, unchanged)
+    conn = get_dict_connection()
     try:
         with conn.cursor() as c:
-            stocks = []
-            for player_tag, data in tracker.players.items():
-                try:
-                    # Get current price
-                    c.execute("""
-                        SELECT stock_value, timestamp 
-                        FROM stock_values 
-                        WHERE player_tag = %s AND champion = %s 
-                        ORDER BY timestamp DESC LIMIT 1
-                    """, (player_tag, data['champion']))
-                    current = c.fetchone()
-                    
-                    # Get earliest price within the last week
-                    week_ago = datetime.now() - timedelta(days=7)
-                    c.execute("""
-                        SELECT stock_value 
-                        FROM stock_values 
-                        WHERE player_tag = %s AND champion = %s AND timestamp <= %s
-                        ORDER BY timestamp DESC LIMIT 1
-                    """, (player_tag, data['champion'], week_ago))
-                    week_ago_price = c.fetchone()
-                    
-                    if current:
-                        current_price = current['stock_value']
-                        # If no week-ago price exists, use the current price (showing 0 change)
-                        week_ago_price = week_ago_price['stock_value'] if week_ago_price else current_price
-                        
-                        stocks.append({
-                            "player_tag": player_tag,
-                            "champion": data['champion'],
-                            "current_price": current_price,
-                            "price_change": current_price - week_ago_price,
-                            "price_change_percent": ((current_price - week_ago_price) / week_ago_price * 100) if week_ago_price else 0,
-                            "last_update": current['timestamp'].isoformat() if isinstance(current['timestamp'], datetime) else current['timestamp']
-                        })
-                    else:
-                        # If no price data exists at all, add with default values
-                        stocks.append({
-                            "player_tag": player_tag,
-                            "champion": data['champion'],
-                            "current_price": 10.0,  # Default starting price
-                            "price_change": 0,
-                            "price_change_percent": 0,
-                            "last_update": datetime.now().isoformat()
-                        })
-                except Exception as e:
-                    print(f"Error processing stock for {player_tag}: {e}")
-                    continue
-        
-        return stocks
+            c.execute("UPDATE markets SET last_refreshed_at = %s WHERE id = %s", (datetime.now().astimezone(), market_id))
+            conn.commit()
     finally:
         conn.close()
 
-@app.get("/api/stocks/{player_tag}")
-async def get_stock_history(player_tag: str, period: str = "1w"):
-    """Get stock history for a specific player"""
-    from lib.database import get_dict_connection
-    conn = get_dict_connection()
+    # --- Dispatch the job to QStash ---
+    qstash_url = "https://qstash.upstash.io/v2/publish/"
+    # The "job" is the URL of our own secure task endpoint
+    destination_url = f"{APP_BASE_URL}/api/tasks/update-market"
     
+    headers = {
+        "Authorization": f"Bearer {QSTASH_TOKEN}",
+        "Content-Type": "application/json",
+    }
+    # The payload QStash will send to our endpoint
+    payload = {"market_id": market_id}
+
+    response = requests.post(destination_url, headers=headers, json=payload)
+    
+    if response.status_code >= 300:
+        print("Error from QStash:", response.text)
+        raise HTTPException(status_code=500, detail="Failed to schedule task with QStash.")
+
+    print(f"Dispatched update task for market {market_id} to QStash.")
+    return {"status": "success", "message": f"Refresh initiated for market {market_id}."}
+
+@app.post("/api/markets/create", status_code=status.HTTP_201_CREATED)
+async def create_market(market_data: MarketCreate):
+    conn = get_dict_connection()
     try:
-        # Validate that the player exists
-        if player_tag not in tracker.players:
-            raise HTTPException(status_code=404, detail="Player not found")
-        
-        # Calculate start date based on period
+        with conn.cursor() as c:
+            # TODO: Add logic to check user's tier and market count limit from `profiles` table
+            
+            invite_code = _generate_invite_code()
+            # Ensure code is unique
+            c.execute("SELECT 1 FROM markets WHERE invite_code = %s", (invite_code,))
+            while c.fetchone():
+                invite_code = _generate_invite_code()
+                c.execute("SELECT 1 FROM markets WHERE invite_code = %s", (invite_code,))
+
+            # Create the market
+            c.execute("INSERT INTO markets (name, creator_id, invite_code) VALUES (%s, %s, %s) RETURNING id",
+                      (market_data.name, market_data.creator_id, invite_code))
+            market_id = c.fetchone()['id']
+            
+            # Add the creator as a member
+            c.execute("INSERT INTO market_members (market_id, user_id) VALUES (%s, %s)",
+                      (market_id, market_data.creator_id))
+            
+            conn.commit()
+            return {"status": "success", "market_id": market_id, "invite_code": invite_code}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        conn.close()
+
+
+@app.post("/api/markets/join", status_code=status.HTTP_200_OK)
+async def join_market(join_data: MarketJoin):
+    conn = get_dict_connection()
+    try:
+        with conn.cursor() as c:
+            # Find the market by invite code
+            c.execute("SELECT id, player_limit FROM markets WHERE invite_code = %s", (join_data.invite_code,))
+            market = c.fetchone()
+            if not market:
+                raise HTTPException(status_code=404, detail="Invalid invite code.")
+            market_id = market['id']
+            
+            # Check if user is already a member
+            c.execute("SELECT 1 FROM market_members WHERE market_id = %s AND user_id = %s", (market_id, join_data.user_id))
+            if c.fetchone():
+                return {"status": "success", "message": "Already a member.", "market_id": market_id}
+
+            # Check if market is full
+            c.execute("SELECT COUNT(*) as member_count FROM market_members WHERE market_id = %s", (market_id,))
+            member_count = c.fetchone()['member_count']
+            if member_count >= market['player_limit']:
+                raise HTTPException(status_code=403, detail="This market is full.")
+
+            # TODO: Add logic to check user's tier and market join limit
+
+            # Add user to the market
+            c.execute("INSERT INTO market_members (market_id, user_id) VALUES (%s, %s)", (market_id, join_data.user_id))
+            conn.commit()
+            return {"status": "success", "message": "Successfully joined market.", "market_id": market_id}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        conn.close()
+
+
+@app.post("/api/markets/{market_id}/players", status_code=status.HTTP_201_CREATED)
+async def add_player_to_market(market_id: int, player_data: PlayerAdd):
+    conn = get_dict_connection()
+    try:
+        with conn.cursor() as c:
+            # 1. Get the tier of the USER making the request.
+            c.execute("SELECT subscription_tier FROM profiles WHERE id = %s", (player_data.user_id,))
+            user_profile = c.fetchone()
+            user_tier = user_profile['subscription_tier'] if user_profile else 'free'
+            
+            # 2. Define tier limits
+            tier_limits = {'free': 1, 'premium': 1, 'pro': 3} # Pro tier can add a player to 3 markets
+            limit = tier_limits.get(user_tier, 1)
+
+            # 3. Check how many times this player has been listed across ALL markets
+            c.execute("SELECT COUNT(*) FROM market_players WHERE player_tag = %s", (player_data.player_tag,))
+            current_count = c.fetchone()['count']
+            
+            if current_count >= limit:
+                raise HTTPException(
+                    status_code=403, 
+                    detail=f"This player is in the max number of markets ({limit}) allowed by your subscription tier."
+                )
+
+            # Step 1: Add the player and get their unique ID for this market
+            c.execute(
+                "INSERT INTO market_players (market_id, player_tag, listed_by_user_id) VALUES (%s, %s, %s) RETURNING id",
+                (market_id, player_data.player_tag, player_data.user_id)
+            )
+            player_id = c.fetchone()['id'] # The variable is named player_id
+
+            # Step 2: Add the initial champion to that player's pool
+            c.execute(
+                "INSERT INTO player_champions (market_player_id, champion_name) VALUES (%s, %s)",
+                (player_id, player_data.initial_champion)
+            )
+
+            # Step 3: Create the initial "IPO" price entry
+            c.execute("""
+                INSERT INTO stock_values 
+                    (market_id, market_player_id, player_tag, champion, stock_value, model_score) 
+                VALUES 
+                    (%s, %s, %s, %s, %s, %s)
+            """, 
+            (
+                market_id, 
+                player_id, # <-- THE FIX: Use the correct variable name 'player_id'
+                player_data.player_tag, 
+                player_data.initial_champion, 
+                10.0,
+                5.0
+            ))
+            
+            conn.commit()
+            # <-- THE FIX: Return the correct variable name 'player_id'
+            return {"status": "success", "player_id": player_id}
+            
+    except Exception as e:
+        if conn: conn.rollback()
+        if 'duplicate key value violates unique constraint' in str(e).lower():
+             raise HTTPException(status_code=409, detail="This player is already in this market.")
+        print(f"!!! ERROR in add_player_to_market: {e}")
+        raise HTTPException(status_code=500, detail="An internal server error occurred.")
+    finally:
+        if conn:
+            conn.close()
+
+
+@app.post("/api/markets/players/{player_id}/champions", status_code=status.HTTP_201_CREATED)
+async def add_champion_to_player(player_id: int, champion_data: ChampionAdd):
+    # TODO: Implement validation against market's champions_per_player_limit
+    conn = get_dict_connection()
+    try:
+        with conn.cursor() as c:
+            c.execute("INSERT INTO player_champions (market_player_id, champion_name) VALUES (%s, %s)",
+                      (player_id, champion_data.champion_name))
+            conn.commit()
+            return {"status": "success"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        conn.close()
+
+
+# --- NEW: Market-aware read-only endpoints ---
+@app.get("/api/markets/{market_id}/stocks")
+async def get_market_stocks(market_id: int):
+    """
+    Gets all stocks for a market, including current price and 24h/7d changes.
+    This is now a powerful query to feed the main market overview table.
+    """
+    conn = get_dict_connection()
+    try:
+        with conn.cursor() as c:
+            now = datetime.now(timezone.utc)
+            day_ago = now - timedelta(days=1)
+            week_ago = now - timedelta(days=7)
+
+            # This complex query uses Common Table Expressions (CTEs) to get everything in one go.
+            c.execute("""
+                WITH latest_prices AS (
+                    SELECT 
+                        player_tag, 
+                        champion, 
+                        stock_value,
+                        timestamp,
+                        ROW_NUMBER() OVER(PARTITION BY player_tag, champion ORDER BY timestamp DESC) as rn
+                    FROM stock_values
+                    WHERE market_id = %(market_id)s
+                ),
+                prices_24h_ago AS (
+                    SELECT DISTINCT ON (player_tag, champion)
+                        player_tag, champion, stock_value
+                    FROM stock_values
+                    WHERE market_id = %(market_id)s AND timestamp <= %(day_ago)s
+                    ORDER BY player_tag, champion, timestamp DESC
+                ),
+                prices_7d_ago AS (
+                    SELECT DISTINCT ON (player_tag, champion)
+                        player_tag, champion, stock_value
+                    FROM stock_values
+                    WHERE market_id = %(market_id)s AND timestamp <= %(week_ago)s
+                    ORDER BY player_tag, champion, timestamp DESC
+                )
+                SELECT 
+                    lp.player_tag,
+                    lp.champion,
+                    lp.stock_value AS current_price,
+                    lp.stock_value - COALESCE(p24h.stock_value, lp.stock_value) AS price_change_24h,
+                    (lp.stock_value - COALESCE(p24h.stock_value, lp.stock_value)) / COALESCE(p24h.stock_value, lp.stock_value) * 100 AS price_change_percent_24h,
+                    lp.stock_value - COALESCE(p7d.stock_value, lp.stock_value) AS price_change_7d,
+                    (lp.stock_value - COALESCE(p7d.stock_value, lp.stock_value)) / COALESCE(p7d.stock_value, lp.stock_value) * 100 AS price_change_percent_7d,
+                    lp.timestamp AS last_update
+                FROM latest_prices lp
+                LEFT JOIN prices_24h_ago p24h ON lp.player_tag = p24h.player_tag AND lp.champion = p24h.champion
+                LEFT JOIN prices_7d_ago p7d ON lp.player_tag = p7d.player_tag AND lp.champion = p7d.champion
+                WHERE lp.rn = 1;
+            """, {'market_id': market_id, 'day_ago': day_ago, 'week_ago': week_ago})
+            
+            stocks = c.fetchall()
+            return stocks
+    finally:
+        conn.close()
+
+@app.get("/api/markets/{market_id}/stocks/{player_tag}/{champion}/history")
+async def get_stock_history(market_id: int, player_tag: str, champion: str, period: str = "1w"):
+    """Gets stock price history for a specific stock within a market."""
+    conn = get_dict_connection()
+    try:
         now = datetime.now()
-        if period == "1d":
-            start_date = now - timedelta(days=1)
-        elif period == "1w":
-            start_date = now - timedelta(days=7)
-        elif period == "1m":
-            start_date = now - timedelta(days=30)
-        elif period == "ytd":
-            start_date = datetime(now.year, 1, 1)
-        else:  # all time
-            start_date = datetime(2000, 1, 1)
-        
-        champion = tracker.players[player_tag]['champion']
+        if period == "1d": start_date = now - timedelta(days=1)
+        elif period == "1w": start_date = now - timedelta(days=7)
+        elif period == "1m": start_date = now - timedelta(days=30)
+        elif period == "ytd": start_date = datetime(now.year, 1, 1)
+        else: start_date = datetime(2000, 1, 1)
         
         with conn.cursor() as c:
             c.execute("""
-                SELECT stock_value, timestamp, game_id
+                SELECT stock_value, timestamp
                 FROM stock_values
-                WHERE player_tag = %s AND champion = %s AND timestamp >= %s
+                WHERE market_id = %s AND player_tag = %s AND champion = %s AND timestamp >= %s
                 ORDER BY timestamp ASC
-            """, (player_tag, champion, start_date))
-            
-            rows = c.fetchall()
-        
-        history = []
-        for row in rows:
-            try:
-                # Convert to Unix timestamp (milliseconds)
-                timestamp = int(row['timestamp'].timestamp() * 1000) if isinstance(row['timestamp'], datetime) else int(datetime.fromisoformat(row['timestamp']).timestamp() * 1000)
-                
-                history.append({
-                    "value": float(row['stock_value']),
-                    "timestamp": timestamp,
-                    "game_id": row['game_id']
-                })
-            except Exception as e:
-                print(f"Error processing row {row}: {e}")
-                continue
-        
-        return history
+            """, (market_id, player_tag, champion, start_date))
+            return c.fetchall()
     finally:
         conn.close()
 
-@app.get("/api/stocks/{player_tag}/scores")
-async def get_player_scores(player_tag: str, limit: int = 5):
-    """Get the most recent model scores for a specific player/champion combination"""
-    from lib.database import get_dict_connection
+@app.get("/api/markets/{market_id}/performers")
+async def get_top_performers(market_id: int, period: str = "1m"):
+    """Gets top and bottom performers for a specific market over a variable period."""
     conn = get_dict_connection()
-    
     try:
-        # Validate that the player exists
-        if player_tag not in tracker.players:
-            raise HTTPException(status_code=404, detail="Player not found")
-        
-        champion = tracker.players[player_tag]['champion']
-        
+        now = datetime.now(timezone.utc)
+        if period == "1d": start_date = now - timedelta(days=1)
+        elif period == "1w": start_date = now - timedelta(days=7)
+        elif period == "ytd": start_date = datetime(now.year, 1, 1, tzinfo=timezone.utc)
+        else: start_date = now - timedelta(days=30) # Default to 1 month
+
         with conn.cursor() as c:
-            # Get the most recent scores
+            # A single, powerful query to get all performance data at once
             c.execute("""
-                SELECT sv1.model_score, sv1.timestamp, sv1.game_id, sv1.stock_value,
-                       (SELECT stock_value FROM stock_values sv2 
-                        WHERE sv2.player_tag = sv1.player_tag 
-                        AND sv2.champion = sv1.champion 
-                        AND sv2.timestamp < sv1.timestamp 
-                        ORDER BY sv2.timestamp DESC LIMIT 1) as previous_stock_value
-                FROM stock_values sv1
-                WHERE sv1.player_tag = %s AND sv1.champion = %s AND sv1.model_score IS NOT NULL
-                ORDER BY sv1.timestamp DESC
-                LIMIT %s
-            """, (player_tag, champion, limit))
-            
-            rows = c.fetchall()
-        
-        scores = []
-        for row in rows:
-            try:
-                model_score = row['model_score']
-                stock_value = row['stock_value']
-                prev_stock_value = row['previous_stock_value']
-                
-                # Fall back to stock_value if no previous value is found (first game)
-                prev_stock_value = prev_stock_value if prev_stock_value is not None else stock_value
-                price_change = stock_value - prev_stock_value
-                
-                # Handle timestamp
-                dt = row['timestamp'] if isinstance(row['timestamp'], datetime) else datetime.fromisoformat(row['timestamp'])
-                timestamp = int(dt.timestamp() * 1000)
-                
-                scores.append({
-                    "score": float(model_score) if model_score is not None else None,
-                    "stock_value": float(stock_value),
-                    "previous_stock_value": float(prev_stock_value),
-                    "price_change": float(price_change),
-                    "timestamp": timestamp,
-                    "formatted_time": dt.strftime("%Y-%m-%d %H:%M"),
-                    "game_id": row['game_id']
-                })
-            except Exception as e:
-                print(f"Error processing row {row}: {e}")
-                continue
-        
-        # Get player's summoner name for display
-        summoner_name = player_tag.split('#')[0]
-        
-        return {
-            "player_tag": player_tag,
-            "summoner_name": summoner_name,
-            "champion": champion,
-            "scores": scores
-        }
-    finally:
-        conn.close()
+                WITH stock_list AS (
+                    SELECT DISTINCT player_tag, champion FROM stock_values WHERE market_id = %(market_id)s
+                ),
+                latest_prices AS (
+                    SELECT DISTINCT ON (player_tag, champion)
+                        player_tag, champion, stock_value
+                    FROM stock_values
+                    WHERE market_id = %(market_id)s
+                    ORDER BY player_tag, champion, timestamp DESC
+                ),
+                historical_prices AS (
+                    SELECT DISTINCT ON (player_tag, champion)
+                        player_tag, champion, stock_value
+                    FROM stock_values
+                    WHERE market_id = %(market_id)s AND timestamp >= %(start_date)s
+                    ORDER BY player_tag, champion, timestamp ASC
+                )
+                SELECT
+                    sl.player_tag,
+                    sl.champion,
+                    lp.stock_value as current_price,
+                    (lp.stock_value - hp.stock_value) / hp.stock_value * 100 AS price_change_percent
+                FROM stock_list sl
+                JOIN latest_prices lp ON sl.player_tag = lp.player_tag AND sl.champion = lp.champion
+                JOIN historical_prices hp ON sl.player_tag = hp.player_tag AND sl.champion = hp.champion
+                WHERE hp.stock_value > 0;
+            """, {'market_id': market_id, 'start_date': start_date})
 
-@app.get("/api/top-performers")
-async def get_top_performers():
-    """Get top 5 and bottom 5 performers over the past month"""
-    from lib.database import get_dict_connection
-    conn = get_dict_connection()
-    
-    try:
-        with conn.cursor() as c:
-            month_ago = datetime.now() - timedelta(days=30)
-            performers = []
-            
-            for player_tag, data in tracker.players.items():
-                # Get current price
-                c.execute("""
-                    SELECT stock_value 
-                    FROM stock_values 
-                    WHERE player_tag = %s AND champion = %s 
-                    ORDER BY timestamp DESC LIMIT 1
-                """, (player_tag, data['champion']))
-                current = c.fetchone()
-                
-                # Get price from a month ago or earliest available price
-                c.execute("""
-                    SELECT stock_value 
-                    FROM stock_values 
-                    WHERE player_tag = %s AND champion = %s
-                    ORDER BY timestamp ASC LIMIT 1
-                """, (player_tag, data['champion']))
-                earliest_price = c.fetchone()
-                
-                if current and earliest_price:
-                    current_price = current['stock_value']
-                    earliest_price_value = earliest_price['stock_value']
-                    change_percent = (current_price - earliest_price_value) / earliest_price_value * 100
-                    performers.append({
-                        "player_tag": player_tag,
-                        "champion": data['champion'],
-                        "current_price": current_price,
-                        "price_change": current_price - earliest_price_value,
-                        "price_change_percent": change_percent
-                    })
-        
-        # Sort by percentage change
+            performers = c.fetchall()
+
+        if not performers:
+            return {"top_performers": [], "bottom_performers": []}
+
         performers.sort(key=lambda x: x['price_change_percent'], reverse=True)
         
-        # If we have less than 10 performers total, adjust the return
-        if len(performers) <= 10:
-            mid_point = len(performers) // 2
-            return {
-                "top_performers": performers[:mid_point],
-                "bottom_performers": performers[mid_point:]
-            }
-        
+        # Handle cases with few performers
+        if len(performers) < 5:
+             return {"top_performers": performers, "bottom_performers": []}
+
         return {
             "top_performers": performers[:5],
             "bottom_performers": performers[-5:]
@@ -276,57 +442,119 @@ async def get_top_performers():
     finally:
         conn.close()
 
-@app.get("/api/market-volatility")
-async def get_market_volatility():
-    """Get daily price changes for volatility calculation"""
-    from lib.database import get_dict_connection
+@app.get("/api/markets/{market_id}/stocks/{player_tag}/{champion}/scores")
+async def get_player_scores(market_id: int, player_tag: str, champion: str, limit: int = 5):
+    """Gets the most recent game scores for a specific stock within a market."""
     conn = get_dict_connection()
-    
     try:
         with conn.cursor() as c:
-            today = datetime.now()
-            yesterday = today - timedelta(days=1)
-            
-            daily_changes = []
-            # Get all unique player_tag and champion combinations
             c.execute("""
-                SELECT DISTINCT player_tag, champion 
-                FROM stock_values
-            """)
-            stocks = c.fetchall()
-            
-            for stock in stocks:
-                player_tag = stock['player_tag']
-                champion = stock['champion']
-                
-                # Get today's and yesterday's prices
-                c.execute("""
-                    SELECT stock_value 
-                    FROM stock_values 
-                    WHERE player_tag = %s AND champion = %s AND timestamp > %s
-                    ORDER BY timestamp ASC
-                """, (player_tag, champion, yesterday))
-                
-                prices = c.fetchall()
-                if len(prices) >= 2:
-                    daily_change = prices[-1]['stock_value'] - prices[0]['stock_value']
-                    daily_changes.append({
-                        "player_tag": player_tag,
-                        "champion": champion,
-                        "daily_change": daily_change
-                    })
-        
-        return daily_changes
+                SELECT sv1.model_score, sv1.timestamp, sv1.game_id, sv1.stock_value,
+                       (SELECT sv2.stock_value FROM stock_values sv2 
+                        WHERE sv2.market_id = sv1.market_id AND sv2.player_tag = sv1.player_tag 
+                        AND sv2.champion = sv1.champion AND sv2.timestamp < sv1.timestamp 
+                        ORDER BY sv2.timestamp DESC LIMIT 1) as previous_stock_value
+                FROM stock_values sv1
+                WHERE sv1.market_id = %s AND sv1.player_tag = %s AND sv1.champion = %s AND sv1.model_score IS NOT NULL
+                ORDER BY sv1.timestamp DESC
+                LIMIT %s
+            """, (market_id, player_tag, champion, limit))
+            return c.fetchall()
     finally:
         conn.close()
 
-# Endpoint to manually trigger an update
-@app.post("/api/update")
-async def trigger_update():
-    """Manually trigger a stock update"""
+@app.get("/api/users/{user_id}/markets")
+async def get_user_markets(user_id: str):
+    """Gets a list of all markets a specific user is a member of."""
+    print(f"--- Backend received request for markets for user: {user_id} ---")
+    
+    conn = None  # Ensure conn is defined in the outer scope
     try:
-        tracker.run()
-        return {"status": "success"}
-    except Exception as e:
-        return {"status": "error", "message": str(e)}
+        conn = get_dict_connection()
+        if conn is None:
+            print("!!! FATAL: Could not get database connection. !!!")
+            raise HTTPException(status_code=500, detail="Database connection could not be established.")
 
+        with conn.cursor() as c:
+            print("[DB] Executing query to find markets...")
+            c.execute("""
+                SELECT m.id, m.name
+                FROM markets m
+                JOIN market_members mm ON m.id = mm.market_id
+                WHERE mm.user_id = %s
+            """, (user_id,))
+            markets = c.fetchall()
+            # This is correct. If the user is in no markets, fetchall() will return an empty list: []
+            print(f"[DB] Query finished. Found {len(markets)} markets.")
+            return markets
+
+    except Exception as e:
+        print(f"!!! ERROR in get_user_markets: {e}")
+        # This will catch any errors, including connection errors, and report them.
+        raise HTTPException(status_code=500, detail="An internal server error occurred while fetching markets.")
+    
+    finally:
+        # This block GUARANTEES that the connection is closed,
+        # which is the most critical part for preventing deadlocks.
+        if conn:
+            conn.close()
+            print("--- Backend request finished, connection closed. ---")
+
+
+class PlayerInMarket(BaseModel):
+    id: int
+    player_tag: str
+    champions: list[str]
+
+class MarketDetails(BaseModel):
+    id: int
+    name: str
+    invite_code: str
+    creator_id: str
+    tier: str
+    player_limit: int
+    champions_per_player_limit: int
+    players: list[PlayerInMarket]
+
+@app.get("/api/markets/{market_id}/manage", response_model=MarketDetails)
+async def get_market_management_details(market_id: int):
+    """Gets all the details needed to manage a market."""
+    conn = get_dict_connection()
+    try:
+        with conn.cursor() as c:
+            # Get market details
+            c.execute("SELECT * FROM markets WHERE id = %s", (market_id,))
+            market = c.fetchone()
+            if not market:
+                raise HTTPException(status_code=404, detail="Market not found")
+            
+            # Get players and their champions in that market
+            c.execute("""
+                SELECT 
+                    mp.id, 
+                    mp.player_tag, 
+                    COALESCE(array_agg(pc.champion_name) FILTER (WHERE pc.champion_name IS NOT NULL), '{}') as champions
+                FROM market_players mp
+                LEFT JOIN player_champions pc ON mp.id = pc.market_player_id
+                WHERE mp.market_id = %s
+                GROUP BY mp.id, mp.player_tag
+            """, (market_id,))
+            players = c.fetchall()
+
+            market['players'] = players
+            return market
+    finally:
+        conn.close()
+
+# You will also need an endpoint to remove a player
+@app.delete("/api/markets/players/{player_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def remove_player_from_market(player_id: int):
+    conn = get_dict_connection()
+    try:
+        with conn.cursor() as c:
+            # ON DELETE CASCADE will handle deleting their champions
+            c.execute("DELETE FROM market_players WHERE id = %s", (player_id,))
+            conn.commit()
+            return
+    finally:
+        conn.close()

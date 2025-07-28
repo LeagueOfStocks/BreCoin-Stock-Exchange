@@ -136,7 +136,7 @@ class MatchAnalyzer:
 
 if __name__ == "__main__":
     analyzer = MatchAnalyzer()
-    SUMMONER_NAME = "M K#vivi"
+    SUMMONER_NAME = "Wasiio#NA1"
 
     # Get PUUID
     game_name, tag_line = SUMMONER_NAME.split('#')

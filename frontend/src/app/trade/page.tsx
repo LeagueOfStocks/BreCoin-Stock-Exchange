@@ -1,14 +1,17 @@
 'use client'
 
-import { useState, useEffect } from 'react'
-import { supabase } from '@/utils/supabase'
-import { useAuth } from '@/app/context/AuthContext'
-import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { useToast } from "@/hooks/use-toast"
-import { Skeleton } from '@/components/ui/skeleton'
+'use client'
+
+import { useState, useEffect } from 'react';
+import { supabase } from '@/utils/supabase';
+import { useAuth } from '@/app/context/AuthContext';
+import { useMarket } from '@/app/context/MarketContext'; // <-- IMPORT THE MARKET CONTEXT
+import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { useToast } from "@/hooks/use-toast";
+import { Skeleton } from '@/components/ui/skeleton';
 
 // Define types for our data
 interface Stock {
@@ -22,82 +25,122 @@ interface UserHolding {
 }
 
 export default function TradePage() {
-  const { user } = useAuth()
-  const { toast } = useToast()
+  // --- THIS IS THE FIX: Initialize hooks at the top level ---
+  const { user } = useAuth();
+  const { currentMarket } = useMarket();
+  const { toast } = useToast();
+  // ---------------------------------------------------------
 
-  const [stocks, setStocks] = useState<Stock[]>([])
-  const [selectedStock, setSelectedStock] = useState<Stock | null>(null)
-  const [userHoldings, setUserHoldings] = useState<UserHolding | null>(null)
-  const [userGold, setUserGold] = useState<number>(0)
-  const [sharesAmount, setSharesAmount] = useState<number | ''>('')
-  const [loading, setLoading] = useState(true)
-  const [tradeLoading, setTradeLoading] = useState(false)
+  const [stocks, setStocks] = useState<Stock[]>([]);
+  const [selectedStock, setSelectedStock] = useState<Stock | null>(null);
+  const [userHoldings, setUserHoldings] = useState<UserHolding | null>(null);
+  const [userGold, setUserGold] = useState<number>(0);
+  const [sharesAmount, setSharesAmount] = useState<number | ''>('');
+  const [loading, setLoading] = useState(true);
+  const [tradeLoading, setTradeLoading] = useState(false);
 
   // Fetch all available stocks and user's gold on initial load
   useEffect(() => {
-    if (!user) return
-    setLoading(true)
-
-    const fetchInitialData = async () => {
-      const { data: stocksData } = await supabase.from('current_stock_prices').select('*')
-      const { data: profileData } = await supabase.from('profiles').select('gold').eq('id', user.id).single()
-
-      if (stocksData) setStocks(stocksData as Stock[])
-      if (profileData) setUserGold(profileData.gold)
-      
-      setLoading(false)
+    // If no market or user is selected, there's nothing to show.
+    if (!user || !currentMarket) {
+        setLoading(false);
+        setStocks([]);
+        return;
     }
-    fetchInitialData()
-  }, [user])
+
+    setLoading(true);
+    const fetchInitialData = async () => {
+      try {
+        const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+        // Use the correct view for current prices in the selected market
+        const stocksPromise = supabase
+            .from('current_stock_prices')
+            .select('*')
+            .eq('market_id', currentMarket.id);
+
+        const profilePromise = supabase
+            .from('profiles')
+            .select('gold')
+            .eq('id', user.id)
+            .single();
+        
+        const [{ data: stocksData }, { data: profileData }] = await Promise.all([stocksPromise, profilePromise]);
+
+        if (stocksData) setStocks(stocksData as Stock[]);
+        if (profileData) setUserGold(profileData.gold);
+
+      } catch (error) {
+        console.error("Error fetching trade data:", error);
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchInitialData();
+  }, [user, currentMarket]);
 
   // Fetch user's specific holdings whenever a new stock is selected
   useEffect(() => {
-    if (!selectedStock || !user) return
+    if (!selectedStock || !user || !currentMarket) return;
 
     const fetchHoldings = async () => {
         const { data } = await supabase
             .from('portfolio_view')
             .select('current_shares')
             .eq('user_id', user.id)
+            .eq('market_id', currentMarket.id) // Also filter holdings by market
             .eq('player_tag', selectedStock.player_tag)
-            .single()
+            .eq('champion', selectedStock.champion) // Be specific
+            .single();
         
-        setUserHoldings(data)
+        setUserHoldings(data);
     }
-    fetchHoldings()
-  }, [selectedStock, user])
+    fetchHoldings();
+  }, [selectedStock, user, currentMarket]);
 
   const handleTrade = async (tradeType: 'BUY' | 'SELL') => {
-    if (!user || !selectedStock || !sharesAmount || sharesAmount <= 0) return
+    if (!user || !selectedStock || !sharesAmount || sharesAmount <= 0) return;
 
-    setTradeLoading(true)
-    const functionName = tradeType === 'BUY' ? 'buy_stock' : 'sell_stock'
+    setTradeLoading(true);
+    const functionName = tradeType === 'BUY' ? 'buy_stock' : 'sell_stock';
     const args = {
         p_user_id: user.id,
         p_player_tag: selectedStock.player_tag,
         p_champion: selectedStock.champion,
+        // The key must match the function's parameter name exactly
         [tradeType === 'BUY' ? 'p_shares_to_buy' : 'p_shares_to_sell']: sharesAmount
-    }
+    };
 
-    const { error } = await supabase.rpc(functionName, args)
+    const { error } = await supabase.rpc(functionName, args);
 
     if (error) {
         toast({
             variant: "destructive",
             title: "Trade Failed",
             description: error.message,
-        })
+        });
     } else {
         toast({
             title: "Trade Successful!",
             description: `You successfully ${tradeType.toLowerCase()}ed ${sharesAmount} shares of ${selectedStock.player_tag}.`,
-        })
-        // Refresh data after a successful trade
-        const { data: profileData } = await supabase.from('profiles').select('gold').eq('id', user.id).single()
-        if (profileData) setUserGold(profileData.gold)
-        setSharesAmount('')
+        });
+        
+        // --- Refresh data after a successful trade ---
+        const { data: profileData } = await supabase.from('profiles').select('gold').eq('id', user.id).single();
+        if (profileData) setUserGold(profileData.gold);
+        // Refetch holdings for the selected stock
+         const { data: holdingsData } = await supabase
+            .from('portfolio_view')
+            .select('current_shares')
+            .eq('user_id', user.id)
+            .eq('market_id', currentMarket.id)
+            .eq('player_tag', selectedStock.player_tag)
+            .eq('champion', selectedStock.champion)
+            .single();
+        setUserHoldings(holdingsData)
+
+        setSharesAmount(''); // Clear the input
     }
-    setTradeLoading(false)
+    setTradeLoading(false);
   }
 
   // Loading state for the main page

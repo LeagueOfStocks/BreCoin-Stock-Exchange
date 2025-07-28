@@ -31,7 +31,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     
     getSession()
 
-    const { data: authListener } = supabase.auth.onAuthStateChange(
+    const { data: subscription } = supabase.auth.onAuthStateChange(
       (event, session) => {
         setUser(session?.user ?? null)
         setLoading(false)
@@ -42,7 +42,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     )
 
     return () => {
-      authListener?.unsubscribe()
+      subscription?.unsubscribe()
     }
   }, [router])
 

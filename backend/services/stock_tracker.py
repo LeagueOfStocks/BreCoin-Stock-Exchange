@@ -6,6 +6,10 @@ import time
 import sys
 import os
 import numpy as np
+import asyncio
+import aiohttp
+import aiofiles
+
 
 # Add current directory to Python path if necessary
 sys.path.append('.')
@@ -31,30 +35,10 @@ class PlayerStockTracker:
         self.headers = {"X-Riot-Token": self.api_key}
         self.base_url = "https://na1.api.riotgames.com"
 
-        self.init_database()
-        
+ 
         # --- MODIFIED: Load 5 specialist models instead of one. ---
         self.models = {}
-        self.load_models()
-        
-        # Player-champion mapping (unchanged)
-        self.players = {
-            "Valyrian#NA2": {"champion": "Vi", "puuid": None},
-            "Maqmood#8397": {"champion": "Camille", "puuid": None},
-            "Wasiio#NA1": {"champion": "Yasuo", "puuid": None},
-            "theultimateace1#001": {"champion": "Anivia", "puuid": None},
-            "Waddłes#NA1": {"champion": "Xerath", "puuid": None},
-            "Hardfeat#1048": {"champion": "Nunu", "puuid": None},
-            "ProbablyCheating#NA1": {"champion": "Jhin", "puuid": None},
-            "SerBlackFish#TDF": {"champion": "Illaoi", "puuid": None},
-            "Pabby032#NA1": {"champion": "Darius", "puuid": None}, 
-            "soulcrucher49#NA1": {"champion": "Taric", "puuid": None},
-            "DuMistGeburt#NA1": {"champion": "Veigar", "puuid": None},
-            "Chocolate Kid#NA1": {"champion": "Vayne", "puuid": None},
-            "CarryPuttar#NA1": {"champion": "Shaco", "puuid": None},
-            "Clarkyclarker#NA1": {"champion": "Evelynn", "puuid": None},
-        }
-        
+
         # --- NEW: Mapping from Riot's API role names to our model keys ---
         self.role_name_mapping = {
             "TOP": "Top",
@@ -68,20 +52,20 @@ class PlayerStockTracker:
         self.valid_game_types = ["RANKED_SOLO_5x5", "RANKED_FLEX_SR", "CLASH", "NORMAL_DRAFT_5x5"]
 
     # --- NEW: Function to load all 5 model files at startup ---
-    def load_models(self):
-        """Loads the 5 specialist model .pkl files into memory."""
-        print("--- Loading all specialist models ---")
-        roles = ['Top', 'Jungle', 'Mid', 'ADC', 'Support']
+    async def load_models_async(self):
+        """Asynchronously loads the 5 specialist model .pkl files into memory."""
+        if self.models: # Don't load if already loaded
+            return
+        print("--- Asynchronously loading all specialist models ---")
         try:
-            for role in roles:
-                role_lower = role.lower()
-                model_filename = f'{role_lower}_model.pkl'
-                with open(model_filename, 'rb') as f_model:
-                    self.models[role] = pickle.load(f_model)
+            for role in ['Top', 'Jungle', 'Mid', 'ADC', 'Support']:
+                model_filename = f'{role.lower()}_model.pkl'
+                async with aiofiles.open(model_filename, 'rb') as f:
+                    content = await f.read()
+                    self.models[role] = pickle.loads(content)
             print("All 5 models have been loaded successfully.")
         except FileNotFoundError as e:
             print(f"!!! CRITICAL ERROR: Could not load models. Missing file: {e.filename} !!!")
-            print("!!! Please ensure all 5 `_model.pkl` files are in the same directory. !!!")
             self.models = {}
 
 
@@ -140,83 +124,67 @@ class PlayerStockTracker:
         finally:
             conn.close()
 
-    def is_game_processed(self, game_id, player_tag, champion):
-        from lib.database import get_connection
-        conn = get_connection()
-        
-        try:
-            with conn.cursor() as c:
-                c.execute('''
-                    SELECT 1 FROM processed_games 
-                    WHERE game_id = %s AND player_tag = %s AND champion = %s
-                ''', (game_id, player_tag, champion))
-                
-                result = c.fetchone()
-                return result is not None
-        finally:
-            conn.close()
+    def is_game_processed(self, market_id, game_id, player_tag, champion): # Add market_id
+            from lib.database import get_connection
+            conn = get_connection()
+            try:
+                with conn.cursor() as c:
+                    c.execute('''
+                        SELECT 1 FROM processed_games 
+                        WHERE market_id = %s AND game_id = %s AND player_tag = %s AND champion = %s
+                    ''', (market_id, game_id, player_tag, champion)) # Add market_id
+                    result = c.fetchone()
+                    return result is not None
+            finally:
+                conn.close()
 
-    def mark_game_processed(self, game_id, player_tag, champion):
+
+    def mark_game_processed(self, market_player_id, game_id, player_tag, champion):
         from lib.database import get_connection
         conn = get_connection()
-        
         try:
             with conn.cursor() as c:
-                c.execute('''
-                    INSERT INTO processed_games (game_id, player_tag, champion, processed_date)
+                c.execute("""
+                    INSERT INTO processed_games (market_player_id, game_id, player_tag, champion)
                     VALUES (%s, %s, %s, %s)
-                ''', (game_id, player_tag, champion, datetime.now()))
-                
+                """, (market_player_id, game_id, player_tag, champion))
                 conn.commit()
         finally:
             conn.close()
 
-    def get_puuid(self, player_tag):
+
+    async def _api_request(self, session, url):
+        """A helper to handle requests and potential rate limiting."""
+        async with session.get(url, headers=self.headers) as response:
+            if response.status == 429:
+                print("Rate limit hit, waiting...")
+                retry_after = int(response.headers.get("Retry-After", 10))
+                await asyncio.sleep(retry_after)
+                return await self._api_request(session, url) # Retry the request
+            response.raise_for_status()
+            return await response.json()
+
+    async def get_puuid(self, session, player_tag):
         gameName, tagLine = player_tag.split('#')
         url = f"https://americas.api.riotgames.com/riot/account/v1/accounts/by-riot-id/{gameName}/{tagLine}"
-        
-        try:
-            response = requests.get(url, headers=self.headers)
-            response.raise_for_status()
-            return response.json()['puuid']
-        except Exception as e:
-            print(f"Error getting PUUID for {player_tag}: {e}")
-            return None
+        data = await self._api_request(session, url)
+        return data['puuid']
 
-    def get_latest_match(self, puuid):
-        url = f"https://americas.api.riotgames.com/lol/match/v5/matches/by-puuid/{puuid}/ids"
-        params = {"count": 1}
-        
-        try:
-            response = requests.get(url, headers=self.headers)
-            response.raise_for_status()
-            match_ids = response.json()
-            return match_ids[0] if match_ids else None
-        except Exception as e:
-            print(f"Error getting match history: {e}")
-            return None
+    async def get_match_ids(self, session, puuid, count=20):
+        """Gets a list of recent matches, not just the latest one."""
+        url = f"https://americas.api.riotgames.com/lol/match/v5/matches/by-puuid/{puuid}/ids?count={count}"
+        return await self._api_request(session, url)
 
-    def get_match_details(self, match_id):
-        url = f"https://americas.api.riotgames.com/lol/match/v5/matches/{match_id}"
+    async def get_match_data(self, session, match_id):
+        """Fetches match details and timeline concurrently."""
+        details_url = f"https://americas.api.riotgames.com/lol/match/v5/matches/{match_id}"
+        timeline_url = f"https://americas.api.riotgames.com/lol/match/v5/matches/{match_id}/timeline"
         
-        try:
-            response = requests.get(url, headers=self.headers)
-            response.raise_for_status()
-            return response.json()
-        except Exception as e:
-            print(f"Error getting match details: {e}")
-            return None
-
-    def get_match_timeline(self, match_id):
-        """NEW function to get the match timeline data for accurate diff stats."""
-        url = f"https://americas.api.riotgames.com/lol/match/v5/matches/{match_id}/timeline"
-        try:
-            response = requests.get(url, headers=self.headers)
-            response.raise_for_status()
-            return response.json()
-        except Exception as e:
-            print(f"Error getting match timeline: {e}")
-            return None
+        details_task = asyncio.create_task(self._api_request(session, details_url))
+        timeline_task = asyncio.create_task(self._api_request(session, timeline_url))
+        
+        match_data, timeline_data = await asyncio.gather(details_task, timeline_task)
+        return match_data, timeline_data
 
     # --- HEAVILY MODIFIED: Calculates all the new, advanced metrics ---
     def calculate_metrics(self, match_data, timeline_data, puuid):
@@ -278,9 +246,6 @@ class PlayerStockTracker:
             gold_diff_per_min = final_gold_diff / game_duration_min
             exp_diff_per_min = final_exp_diff / game_duration_min
 
-
-        
-            
         metrics = {
             'role': self.role_name_mapping.get(participant['teamPosition'], 'UNKNOWN'),
             'kda': (participant.get('kills', 0) + participant.get('assists', 0)) / max(1, participant.get('deaths', 1)),
@@ -303,140 +268,142 @@ class PlayerStockTracker:
         }
         return metrics
 
-    def get_current_stock(self, player_tag, champion):
+    def get_current_stock(self, market_id, player_tag, champion): # Add market_id
         from lib.database import get_connection
         conn = get_connection()
-        
         try:
             with conn.cursor() as c:
                 c.execute('''
                     SELECT stock_value FROM stock_values 
-                    WHERE player_tag = %s AND champion = %s
+                    WHERE market_id = %s AND player_tag = %s AND champion = %s
                     ORDER BY timestamp DESC LIMIT 1
-                ''', (player_tag, champion))
-                
+                ''', (market_id, player_tag, champion)) # Add market_id
                 result = c.fetchone()
-                return result[0] if result else 10.0  # Default value
+                return result[0] if result else 10.0
         finally:
             conn.close()
 
-    def update_stock(self, player_tag, champion, new_value, model_score, game_id):
-        from lib.database import get_connection
-        conn = get_connection()
-        
-        # Convert NumPy types to Python native types
-        if hasattr(new_value, 'item'):  # Check if it's a NumPy type
-            new_value = new_value.item()
-        
-        if hasattr(model_score, 'item'):  # Check if it's a NumPy type
-            model_score = model_score.item()
-        
-        try:
-            with conn.cursor() as c:
-                c.execute('''
-                    INSERT INTO stock_values (player_tag, champion, stock_value, model_score, timestamp, game_id)
-                    VALUES (%s, %s, %s, %s, %s, %s)
-                ''', (player_tag, champion, float(new_value), float(model_score), datetime.now(), game_id))
-                
-                conn.commit()
-        finally:
-            conn.close()
 
-    def calculate_new_stock(self, current_stock, model_score, alpha=0.4):
-        # Existing method unchanged
-        adjustment = (model_score - 5) * 2
+    def update_stock(self, market_player_id, player_tag, champion, new_value, model_score, game_id):
+            from lib.database import get_connection
+            conn = get_connection()
+            try:
+                # ... (your numpy conversion logic) ...
+                with conn.cursor() as c:
+                    c.execute("""
+                        INSERT INTO stock_values (market_player_id, player_tag, champion, stock_value, model_score, game_id)
+                        VALUES (%s, %s, %s, %s, %s, %s)
+                    """, (market_player_id, player_tag, champion, new_value, model_score, game_id))
+                    conn.commit()
+            finally:
+                conn.close()
+
+
+
+
+    def calculate_new_stock(self, current_stock, model_score, market_config, alpha=0.4): # Add market_config
+        # Incorporate multipliers from market config
+        # This is a simple example; you can make the logic more complex
+        multiplier = market_config.get('config_multipliers', {}).get('default', 1.0)
+        adjusted_score = model_score * multiplier
+        
+        adjustment = (adjusted_score - 5) * 2
         raw_new_stock = current_stock + adjustment
         new_stock = alpha * raw_new_stock + (1 - alpha) * current_stock
-        return max(0, new_stock)
+        return max(0.1, new_stock) # Set a floor price
+
 
     # --- RUN METHOD FULLY RESTORED ---
-    def run(self):
-        """Main application loop, now using the specialist model architecture."""
-        if not self.models:
-            print("Models not loaded. Aborting run.")
+    def get_market_config_and_players(self, market_id: int):
+        conn = get_dict_connection()
+        try:
+            with conn.cursor() as c:
+                c.execute("SELECT tier, config_multipliers FROM markets WHERE id = %s", (market_id,))
+                market_config = c.fetchone()
+                if not market_config: return None, None
+
+                # NEW: Also select the market_player ID (mp.id)
+                c.execute("""
+                    SELECT mp.id, mp.player_tag, array_agg(pc.champion_name) as champions
+                    FROM market_players mp
+                    JOIN player_champions pc ON mp.id = pc.market_player_id
+                    WHERE mp.market_id = %s
+                    GROUP BY mp.id, mp.player_tag
+                """, (market_id,))
+                players = c.fetchall()
+                # NEW: The map now stores the ID as well as the champions
+                player_map = {p['player_tag']: {'id': p['id'], 'champions': p['champions']} for p in players}
+                return market_config, player_map
+        finally:
+            conn.close()
+
+    async def process_player(self, session, market_id, market_config, player_tag, allowed_champions):
+        """The core async logic for updating a single player within a market."""
+        try:
+            print(f"Processing {player_tag} for market {market_id}...")
+            puuid = await self.get_puuid(session, player_tag)
+            if not puuid: return
+
+            match_ids = await self.get_match_ids(session, puuid)
+            
+            for match_id in match_ids:
+                match_data, timeline_data = await self.get_match_data(session, match_id)
+                participant_data = next((p for p in match_data['info']['participants'] if p['puuid'] == puuid), None)
+                
+                if not participant_data: continue
+                champion_played = participant_data['championName']
+                
+                if champion_played not in allowed_champions:
+                    continue
+                
+                if self.is_game_processed(market_id, match_id, player_tag, champion_played):
+                    # We have found the most recent game that's already been processed.
+                    # This means we don't need to look any further back in their history.
+                    return
+
+                # If we are here, this is the newest, unprocessed game on an allowed champion.
+                print(f"Found new game {match_id} for {player_tag} on {champion_played}.")
+                
+                metrics = self.calculate_metrics(match_data, timeline_data, puuid)
+                if not metrics: continue
+                
+                role = metrics.pop('role')
+                if role not in self.models: continue
+
+                model_input_df = pd.DataFrame([metrics], columns=FEATURE_ORDER)
+                raw_model_score = self.models[role].predict(model_input_df)[0]
+                final_model_score = np.clip(raw_model_score, 0, 10)
+                
+                current_stock = self.get_current_stock(market_id, player_tag, champion_played)
+                new_stock = self.calculate_new_stock(current_stock, final_model_score, market_config)
+                
+                self.update_stock(market_id, player_tag, champion_played, new_stock, final_model_score, match_id)
+                self.mark_game_processed(market_id, match_id, player_tag, champion_played)
+                
+                print(f"Successfully processed and updated stock for {player_tag} from game {match_id}.")
+                return # We only process ONE game per player per refresh cycle.
+
+        except Exception as e:
+            print(f"!!! FAILED to process {player_tag} for market {market_id}: {e}")
+
+    async def update_market_stocks(self, market_id: int):
+        """The main entry point for a background worker to call."""
+        print(f"--- Starting background stock update for market {market_id} ---")
+        await self.load_models_async()
+        
+        market_config, players_to_update = self.get_market_config_and_players(market_id)
+        if not players_to_update:
+            print(f"No players found for market {market_id}. Aborting update.")
             return
 
-        # First, get PUUIDs for all players
-        for player_tag in self.players:
-            self.players[player_tag]['puuid'] = self.get_puuid(player_tag)
-            time.sleep(1.5)
-
-        # Process each player's latest match
-        for player_tag, data in self.players.items():
-            puuid = data['puuid']
-            champion = data['champion']
-            if not puuid:
-                continue
-
-            match_id = self.get_latest_match(puuid)
-            time.sleep(1.5)
-            if not match_id:
-                continue
-            
-            match_data = self.get_match_details(match_id)
-            time.sleep(1.5)
-            timeline_data = self.get_match_timeline(match_id)
-            time.sleep(1.5)
-            if not match_data or not timeline_data:
-                continue
-
-            queue_to_game_type = {420: "RANKED_SOLO_5x5", 440: "RANKED_FLEX_SR", 700: "CLASH", 400: "NORMAL_DRAFT_5x5"}
-            game_type = queue_to_game_type.get(match_data['info'].get('queueId', 0))
-            if not game_type or game_type not in self.valid_game_types:
-                print(f"\nSkipping game {match_id} - invalid game type.")
-                continue
-
-            participant_data = next((p for p in match_data['info']['participants'] if p['puuid'] == puuid), None)
-            if not participant_data or participant_data['championName'] != champion:
-                print(f"\n{player_tag} was not in game {match_id} on {champion}.")
-                continue
-                
-            if self.is_game_processed(match_id, player_tag, champion):
-                print(f"\nAlready processed {player_tag} on {champion} for game {match_id}.")
-                continue
-
-            print(f"\nProcessing {player_tag} on {champion} in game {match_id}")
-            
-            metrics = self.calculate_metrics(match_data, timeline_data, puuid)
-            if not metrics:
-                continue
-            
-            role = metrics.pop('role')
-            if role not in self.models:
-                print(f"Skipping prediction for unrecognized role: {role}")
-                continue
-
-            print(f"\nCollected values for {player_tag} on {champion} in role {role}:")
-            # Create the DataFrame in the correct order BEFORE printing
-            model_input_df = pd.DataFrame([metrics], columns=FEATURE_ORDER)
-            for col in FEATURE_ORDER: 
-                print(f"{col}: {model_input_df[col].iloc[0]:.2f}")
-
-            model = self.models[role]
-            raw_model_score = model.predict(model_input_df)[0]
-
-            
-            model_input_df = pd.DataFrame([metrics], columns=FEATURE_ORDER)
-            
-            model = self.models[role]
-            
-            raw_model_score = model.predict(model_input_df)[0]
-            
-            final_model_score = np.clip(raw_model_score, 0, 10)
-            
-            current_stock = self.get_current_stock(player_tag, champion)
-            new_stock = self.calculate_new_stock(current_stock, final_model_score)
-            self.update_stock(player_tag, champion, new_stock, final_model_score, match_id)
-            
-            self.mark_game_processed(match_id, player_tag, champion)
-            
-            print(f"\nRaw Model Score: {raw_model_score:.2f}")
-            print(f"Final Clipped Score: {final_model_score:.2f}/10")
-            print(f"Previous Stock: {current_stock:.2f}")
-            print(f"New Stock: {new_stock:.2f}")
-            print(f"Game ID: {match_id}")
-            
-            time.sleep(1.5)
+        async with aiohttp.ClientSession() as session:
+            tasks = [
+                self.process_player(session, market_id, market_config, player_tag, data['champions'])
+                for player_tag, data in players_to_update.items()
+            ]
+            await asyncio.gather(*tasks)
+        
+        print(f"--- Finished background update for market {market_id} ---")
 
 if __name__ == "__main__":
     API_KEY = "RGAPI-96e31f4f-559c-4027-9a3e-77ae58e84a3f"

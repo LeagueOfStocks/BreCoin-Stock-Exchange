@@ -2,7 +2,8 @@ import type { Metadata } from 'next'
 import { Inter } from 'next/font/google'
 import Navigation from '@/components/Navigation'
 import { AuthProvider } from './context/AuthContext'
-import { Toaster } from "@/components/ui/toaster" // <-- IMPORT THE TOASTER
+import { MarketProvider } from './context/MarketContext' // <-- IMPORT
+import { Toaster } from "@/components/ui/toaster"
 import './globals.css'
 
 const inter = Inter({ subsets: ['latin'] })
@@ -21,11 +22,13 @@ export default function RootLayout({
     <html lang="en">
       <body className={inter.className}>
         <AuthProvider>
-          <Navigation />
-          <main className="max-w-7xl mx-auto p-4">
-            {children}
-          </main>
-          <Toaster /> {/* <-- ADD THE TOASTER COMPONENT HERE, AT THE END */}
+          <MarketProvider> {/* <-- WRAPPER START */}
+            <Navigation />
+            <main className="max-w-7xl mx-auto p-4">
+              {children}
+            </main>
+            <Toaster />
+          </MarketProvider> {/* <-- WRAPPER END */}
         </AuthProvider>
       </body>
     </html>
