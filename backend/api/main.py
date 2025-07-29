@@ -27,6 +27,13 @@ QSTASH_CURRENT_SIGNING_KEY = os.getenv("QSTASH_CURRENT_SIGNING_KEY")
 QSTASH_NEXT_SIGNING_KEY = os.getenv("QSTASH_NEXT_SIGNING_KEY")
 APP_BASE_URL = os.getenv("APP_BASE_URL")
 
+# --- Temporary Middleware to Log Request Methods ---
+@app.middleware("http")
+async def log_request_method(request: Request, call_next):
+    print(f"INCOMING REQUEST: {request.method} {request.url}")
+    response = await call_next(request)
+    return response
+
 # --- CORS Middleware (Corrected and Explicit) ---
 app.add_middleware(
     CORSMiddleware,
