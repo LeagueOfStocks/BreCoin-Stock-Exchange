@@ -1,6 +1,6 @@
 'use client'
 
-import { createContext, useState, useEffect, useContext, useCallback, useRef } from 'react'
+import { createContext, useState, useEffect, useContext, useCallback, useRef, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
 import { useAuth } from './AuthContext'
 
@@ -15,7 +15,7 @@ interface MarketContextType {
   selectMarket: (market: Market) => void;
   refreshUserMarkets: () => Promise<void>;
   loading: boolean;
-  initialized: boolean; // Add initialized state
+  initialized: boolean;
 }
 
 const MarketContext = createContext<MarketContextType | null>(null);
@@ -25,24 +25,12 @@ export const MarketProvider = ({ children }: { children: React.ReactNode }) => {
   const router = useRouter();
   const [userMarkets, setUserMarkets] = useState<Market[]>([]);
   const [currentMarket, setCurrentMarket] = useState<Market | null>(null);
-  const [loading, setLoading] = useState(false); // Start with false to prevent initial loading
+  const [loading, setLoading] = useState(false);
   const [initialized, setInitialized] = useState(false);
-  
-  // Use refs to prevent dependency issues
-  const userRef = useRef(user);
-  const initializedRef = useRef(initialized);
-  userRef.current = user;
-  initializedRef.current = initialized;
 
   // This is the function that fetches the data
   const fetchUserMarkets = useCallback(async () => {
-    const currentUser = userRef.current;
-    const isInitialized = initializedRef.current;
-    
-    console.log("[MarketContext] fetchUserMarkets called. Current user:", currentUser?.id);
-
-    if (!currentUser) {
-      console.log("[MarketContext] No user found. Resetting state and stopping.");
+    if (!user) {
       setUserMarkets([]);
       setCurrentMarket(null);
       setLoading(false);
@@ -50,20 +38,17 @@ export const MarketProvider = ({ children }: { children: React.ReactNode }) => {
       return;
     }
 
-    // Only show loading on first initialization, not on re-fetches
-    if (!isInitialized) {
+    // Only show loading on first initialization
+    if (!initialized) {
       setLoading(true);
     }
     
     const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
     try {
-      console.log(`[MarketContext] Fetching from API: ${API_URL}/api/users/${currentUser.id}/markets`);
-      const response = await fetch(`${API_URL}/api/users/${currentUser.id}/markets`);
+      const response = await fetch(`${API_URL}/api/users/${user.id}/markets`);
       if (!response.ok) throw new Error('API fetch failed with status: ' + response.status);
       
       const markets: Market[] = await response.json();
-      console.log("[MarketContext] API Response OK. Markets received:", markets);
-
       setUserMarkets(markets);
 
       if (markets.length > 0) {
@@ -71,10 +56,8 @@ export const MarketProvider = ({ children }: { children: React.ReactNode }) => {
         const lastMarket = markets.find(m => m.id.toString() === lastSelectedMarketId);
         const newMarket = lastMarket || markets[0];
         setCurrentMarket(newMarket);
-        console.log("[MarketContext] Setting state: loading=false, currentMarket=", newMarket);
       } else {
         setCurrentMarket(null);
-        console.log("[MarketContext] Setting state: loading=false, currentMarket=null");
       }
     } catch (error) {
       console.error("[MarketContext] An error occurred in fetchUserMarkets:", error);
@@ -84,30 +67,28 @@ export const MarketProvider = ({ children }: { children: React.ReactNode }) => {
       setLoading(false);
       setInitialized(true);
     }
-  }, []); // Remove all dependencies to prevent re-creation
+  }, [user, initialized]); // Keep minimal dependencies
 
-  // This useEffect hook is the entry point. It runs when the `user` object changes.
+  // This useEffect hook is the entry point. It runs when the user changes.
   useEffect(() => {
-    // Don't fetch if auth is still loading
     if (authLoading) return;
-    
-    console.log("[MarketContext] useEffect triggered. User has changed.", { user_id: user?.id });
     fetchUserMarkets();
-  }, [user?.id, authLoading, fetchUserMarkets]); // Only depend on user ID, not the whole user object
+  }, [user?.id, authLoading]); // Only depend on user ID and authLoading
 
-  const selectMarket = (market: Market) => {
+  const selectMarket = useCallback((market: Market) => {
     setCurrentMarket(market);
     localStorage.setItem('lastSelectedMarketId', market.id.toString());
-  };
+  }, []);
 
-  const value = {
+  // CRITICAL FIX: Memoize the context value to prevent unnecessary re-renders
+  const value = useMemo(() => ({
     userMarkets,
     currentMarket,
     selectMarket,
     refreshUserMarkets: fetchUserMarkets,
     loading,
     initialized,
-  };
+  }), [userMarkets, currentMarket, selectMarket, fetchUserMarkets, loading, initialized]);
 
   return (
     <MarketContext.Provider value={value}>

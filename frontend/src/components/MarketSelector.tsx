@@ -10,16 +10,12 @@ import { Skeleton } from "@/components/ui/skeleton"
 export default function MarketSelector() {
     const { userMarkets, currentMarket, selectMarket, loading, initialized } = useMarket()
 
-    // --- Add console log to see EVERY render ---
-    console.log("MarketSelector rendering with state:", { loading, initialized, currentMarket: currentMarket, marketCount: userMarkets.length });
-
-    // Condition 1: We are in the initial loading phase.
+    // We are in the initial loading phase.
     if (!initialized || loading) {
         return <Skeleton className="w-48 h-10" />
     }
 
-    // Condition 2: Loading is finished, and there is NO current market.
-    // This is the state for a new user or a user with no markets.
+    // Loading is finished, and there is NO current market.
     if (!currentMarket) {
         return (
             <Link href="/selector_lobby">
@@ -30,8 +26,7 @@ export default function MarketSelector() {
         )
     }
 
-    // Condition 3: Loading is finished, and there IS a current market.
-    // This is the state for an existing user.
+    // Loading is finished, and there IS a current market.
     return (
         <div className="flex items-center gap-2">
             <Select
