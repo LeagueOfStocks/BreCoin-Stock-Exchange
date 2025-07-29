@@ -102,21 +102,20 @@ async def refresh_market(market_id: int):
     
     # --- Dispatch job to QStash ---
     destination_url = f"{APP_BASE_URL}/api/tasks/update-market"
-    print(f"Dispatching to QStash with destination: '{destination_url}'")  # <--- ADD THIS LINE
-
+    
+    # Method 1: Using destination as URL parameter (recommended)
+    publish_url = f"{QSTASH_URL}/{destination_url}"
+    
     headers = {
         "Authorization": f"Bearer {QSTASH_TOKEN}",
         "Content-Type": "application/json"
     }
-    payload = {
-        "destination": destination_url,
-        "body": json.dumps({"market_id": market_id})
-    }
+    
+    # The payload is just the body that will be sent to your webhook
+    payload = {"market_id": market_id}
 
     try:
-        publish_url = QSTASH_URL
         print(f"Dispatching task to QStash publish URL: {publish_url}")
-        print(f"QStash payload: {payload}")
         response = requests.post(publish_url, headers=headers, json=payload)
         response.raise_for_status()
     except requests.exceptions.RequestException as e:
@@ -124,7 +123,6 @@ async def refresh_market(market_id: int):
         if e.response is not None:
             print(f"!!! QStash Response Body: {e.response.text}")
         raise HTTPException(status_code=500, detail="Failed to schedule background task.")
-    
 
     print(f"Successfully dispatched update task for market {market_id} to QStash.")
     return {"status": "success", "message": "Refresh initiated."}
