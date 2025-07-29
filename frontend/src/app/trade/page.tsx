@@ -1,11 +1,9 @@
 'use client'
 
-'use client'
-
 import { useState, useEffect } from 'react';
 import { supabase } from '@/utils/supabase';
 import { useAuth } from '@/app/context/AuthContext';
-import { useMarket } from '@/app/context/MarketContext'; // <-- IMPORT THE MARKET CONTEXT
+import { useMarket } from '@/app/context/MarketContext';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -25,30 +23,37 @@ interface UserHolding {
 }
 
 export default function TradePage() {
-  // --- THIS IS THE FIX: Initialize hooks at the top level ---
-  const { user } = useAuth();
-  const { currentMarket } = useMarket();
+  const { user, isLoading: authLoading } = useAuth();
+  const { currentMarket, initialized: marketInitialized } = useMarket();
   const { toast } = useToast();
-  // ---------------------------------------------------------
 
   const [stocks, setStocks] = useState<Stock[]>([]);
   const [selectedStock, setSelectedStock] = useState<Stock | null>(null);
   const [userHoldings, setUserHoldings] = useState<UserHolding | null>(null);
   const [userGold, setUserGold] = useState<number>(0);
   const [sharesAmount, setSharesAmount] = useState<number | ''>('');
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false); // Start with false
+  const [initialized, setInitialized] = useState(false); // Track initialization
   const [tradeLoading, setTradeLoading] = useState(false);
 
   // Fetch all available stocks and user's gold on initial load
   useEffect(() => {
+    // Wait for auth and market context to be ready
+    if (authLoading || !marketInitialized) return;
+
     // If no market or user is selected, there's nothing to show.
     if (!user || !currentMarket) {
         setLoading(false);
+        setInitialized(true);
         setStocks([]);
         return;
     }
 
-    setLoading(true);
+    // Only show loading on first initialization
+    if (!initialized && stocks.length === 0) {
+        setLoading(true);
+    }
+
     const fetchInitialData = async () => {
       try {
         const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
@@ -73,10 +78,11 @@ export default function TradePage() {
         console.error("Error fetching trade data:", error);
       } finally {
         setLoading(false);
+        setInitialized(true);
       }
     };
     fetchInitialData();
-  }, [user, currentMarket]);
+  }, [user, currentMarket, authLoading, marketInitialized, initialized, stocks.length]);
 
   // Fetch user's specific holdings whenever a new stock is selected
   useEffect(() => {
@@ -143,8 +149,8 @@ export default function TradePage() {
     setTradeLoading(false);
   }
 
-  // Loading state for the main page
-  if (loading) {
+  // Only show loading skeleton on first load when contexts aren't ready
+  if (!marketInitialized || authLoading || (loading && !initialized)) {
     return (
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             <Skeleton className="h-[500px] md:col-span-1" />

@@ -25,7 +25,7 @@ export const MarketProvider = ({ children }: { children: React.ReactNode }) => {
   const router = useRouter();
   const [userMarkets, setUserMarkets] = useState<Market[]>([]);
   const [currentMarket, setCurrentMarket] = useState<Market | null>(null);
-  const [loading, setLoading] = useState(false); // Start with false
+  const [loading, setLoading] = useState(false); // Start with false to prevent initial loading
   const [initialized, setInitialized] = useState(false);
 
   // This is the function that fetches the data
@@ -41,8 +41,8 @@ export const MarketProvider = ({ children }: { children: React.ReactNode }) => {
       return;
     }
 
-    // Only show loading if we haven't initialized yet
-    if (!initialized) {
+    // Only show loading on first initialization, not on re-fetches
+    if (!initialized && userMarkets.length === 0) {
       setLoading(true);
     }
     
@@ -75,7 +75,7 @@ export const MarketProvider = ({ children }: { children: React.ReactNode }) => {
       setLoading(false);
       setInitialized(true);
     }
-  }, [user, initialized]);
+  }, [user, initialized, userMarkets.length]);
 
   // This useEffect hook is the entry point. It runs when the `user` object changes.
   useEffect(() => {

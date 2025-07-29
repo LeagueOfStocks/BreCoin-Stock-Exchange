@@ -8,13 +8,13 @@ import { Settings } from "lucide-react"
 import { Skeleton } from "@/components/ui/skeleton"
 
 export default function MarketSelector() {
-    const { userMarkets, currentMarket, selectMarket, loading } = useMarket()
+    const { userMarkets, currentMarket, selectMarket, loading, initialized } = useMarket()
 
     // --- Add console log to see EVERY render ---
-    console.log("MarketSelector rendering with state:", { loading, currentMarket: currentMarket, marketCount: userMarkets.length });
+    console.log("MarketSelector rendering with state:", { loading, initialized, currentMarket: currentMarket, marketCount: userMarkets.length });
 
     // Condition 1: We are in the initial loading phase.
-    if (loading) {
+    if (!initialized || loading) {
         return <Skeleton className="w-48 h-10" />
     }
 

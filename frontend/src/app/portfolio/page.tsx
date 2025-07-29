@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { supabase } from '@/utils/supabase'
-import { useAuth } from '@/app/context/AuthContext' // Corrected the import path
+import { useAuth } from '@/app/context/AuthContext'
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from '@/components/ui/card'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -26,21 +26,26 @@ interface Transaction {
 }
 
 export default function PortfolioPage() {
-  const { user } = useAuth()
+  const { user, isLoading: authLoading } = useAuth()
   const [holdings, setHoldings] = useState<Holding[]>([])
   const [transactions, setTransactions] = useState<Transaction[]>([])
   const [gold, setGold] = useState<number>(0)
-  const [loading, setLoading] = useState(true)
+  const [loading, setLoading] = useState(false) // Start with false
+  const [initialized, setInitialized] = useState(false) // Track initialization
 
   useEffect(() => {
+    // Wait for auth to be ready
+    if (authLoading) return;
+
     if (!user) {
         setLoading(false);
+        setInitialized(true);
         return;
     }
 
     const fetchData = async () => {
       // Only show loading state on initial load when we have no data
-      if (holdings.length === 0 && transactions.length === 0) {
+      if (!initialized && holdings.length === 0 && transactions.length === 0) {
         setLoading(true);
       }
 
@@ -99,13 +104,14 @@ export default function PortfolioPage() {
       }
 
       setLoading(false);
+      setInitialized(true);
     }
 
     fetchData();
-  }, [user, holdings.length, transactions.length]);
+  }, [user, authLoading, initialized, holdings.length, transactions.length]);
 
-  // This handles the initial loading state
-  if (loading) {
+  // Only show loading skeleton on initial load when auth is not ready
+  if (authLoading || (loading && !initialized)) {
     return (
       <div className="space-y-6 p-4 md:p-8">
         <Skeleton className="h-24 w-full" />

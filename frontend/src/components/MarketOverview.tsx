@@ -23,7 +23,7 @@ interface Stock {
 }
 
 const MarketOverview = () => {
-  const { currentMarket } = useMarket();
+  const { currentMarket, initialized: marketInitialized } = useMarket();
   const { toast } = useToast();
   const router = useRouter();
   
@@ -34,7 +34,8 @@ const MarketOverview = () => {
     volatilityIndex: 0,
     lastRefreshed: null as string | null,
   });
-  const [loading, setLoading] = useState(true); // Stays true by default for initial load
+  const [loading, setLoading] = useState(false); // Start with false
+  const [initialized, setInitialized] = useState(false); // Track if component has been initialized
   const [isRefreshing, setIsRefreshing] = useState(false);
   const pollIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -59,22 +60,14 @@ const MarketOverview = () => {
     if (!currentMarket?.id) {
         setLoading(false);
         setStocks([]);
+        setInitialized(true);
         return;
     }
 
-    //
-    // v-- THE KEY CHANGE IS HERE --v
-    //
-    // Only set the main 'loading' state if there are no stocks to display.
-    // If we already have stocks, the page will NOT go into a loading state,
-    // and the old data will remain visible.
-    //
-    if (stocks.length === 0) {
+    // Only show loading skeleton on first load when we have no data and haven't initialized
+    if (!initialized && stocks.length === 0) {
         setLoading(true);
     }
-    //
-    // ^-- END OF KEY CHANGE --^
-    //
 
     try {
         const response = await fetch(`${API_URL}/api/markets/${currentMarket.id}/stocks`);
@@ -102,14 +95,22 @@ const MarketOverview = () => {
     } finally {
         // Always set loading to false after a fetch attempt
         setLoading(false);
+        setInitialized(true);
     }
-  }, [currentMarket?.id, stocks.length]); // <-- Add stocks.length as a dependency
+  }, [currentMarket?.id, initialized, stocks.length]);
 
   useEffect(() => {
-    if (currentMarket?.id) { // <-- Check for the id
+    // Wait for market context to be initialized before fetching
+    if (!marketInitialized) return;
+    
+    if (currentMarket?.id) {
         fetchData();
+    } else {
+        // If no market is selected, mark as initialized without loading
+        setInitialized(true);
+        setLoading(false);
     }
-  }, [currentMarket?.id, fetchData]); // <-- CRITICAL CHANGE: Depend on the ID, not the object
+  }, [currentMarket?.id, fetchData, marketInitialized]);
   
   const handleRefresh = async () => {
     if (!currentMarket) return;
@@ -136,8 +137,8 @@ const MarketOverview = () => {
     }
   };
 
-  // This initial loading check is now perfect. It only runs once.
-  if (loading) {
+  // Only show loading skeleton on initial load when market context is not ready
+  if (!marketInitialized || (loading && !initialized)) {
     return <div className="space-y-6"><Skeleton className="h-28 w-full" /><Skeleton className="h-96 w-full" /></div>
   }
 

@@ -21,7 +21,6 @@ const AuthContext = createContext<AuthContextType | null>(null)
 export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const [user, setUser] = useState<User | null>(null)
   const [loading, setLoading] = useState(true)
-  const [initialized, setInitialized] = useState(false)
   const router = useRouter()
 
   useEffect(() => {
@@ -34,7 +33,6 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         setUser(null)
       } finally {
         setLoading(false)
-        setInitialized(true)
       }
     }
     
