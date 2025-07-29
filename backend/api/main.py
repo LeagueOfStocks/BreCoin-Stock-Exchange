@@ -1,77 +1,114 @@
-from fastapi import FastAPI, HTTPException, status, Depends, Request
-from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
-from datetime import datetime, timedelta, timezone
 import os
-from dotenv import load_dotenv
-from lib.database import get_dict_connection
-import requests
-from services.stock_tracker import PlayerStockTracker
-import random
 import string
+import random
 import hmac
 import hashlib
 import base64
+from datetime import datetime, timedelta, timezone
 
-# --- Get all QStash keys from environment ---
-QSTASH_TOKEN = os.getenv("QSTASH_TOKEN")
-QSTASH_CURRENT_SIGNING_KEY = os.getenv("QSTASH_CURRENT_SIGNING_KEY")
-QSTASH_NEXT_SIGNING_KEY = os.getenv("QSTASH_NEXT_SIGNING_KEY")
-# This is the URL of our own deployed application
-# You MUST set this in your .env file and on Render
-# e.g., APP_BASE_URL=https://brecoin-backend.onrender.com
-APP_BASE_URL = os.getenv("APP_BASE_URL")
+import requests
+from dotenv import load_dotenv
+from fastapi import FastAPI, HTTPException, status, Depends, Request
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 
+from lib.database import get_dict_connection
+from services.stock_tracker import PlayerStockTracker
 
-# --- App Setup ---
+# --- Initial Setup ---
 load_dotenv()
 app = FastAPI()
 
+# --- Environment Variables ---
+RIOT_API_KEY = os.getenv("RIOT_API_KEY")
+QSTASH_URL = os.getenv("QSTASH_URL", "https://qstash.upstash.io/v2/publish/")
+QSTASH_TOKEN = os.getenv("QSTASH_TOKEN")
+QSTASH_CURRENT_SIGNING_KEY = os.getenv("QSTASH_CURRENT_SIGNING_KEY")
+QSTASH_NEXT_SIGNING_KEY = os.getenv("QSTASH_NEXT_SIGNING_KEY")
+APP_BASE_URL = os.getenv("APP_BASE_URL")
 
+# --- CORS Middleware (Corrected and Explicit) ---
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "https://brecoin-stock-exchange.vercel.app"],
+    allow_origins=[
+        "http://localhost:3000",
+        "https://brecoin-stock-exchange.vercel.app"
+    ],
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "OPTIONS", "DELETE", "PUT", "PATCH"],
     allow_headers=["*"],
 )
 
-# Initialize tracker
-API_KEY = os.getenv("RIOT_API_KEY")
-tracker = PlayerStockTracker(API_KEY)
+# --- Pydantic Models ---
+class MarketCreate(BaseModel): name: str; creator_id: str
+class MarketJoin(BaseModel): invite_code: str; user_id: str
+class PlayerAdd(BaseModel): player_tag: str; user_id: str; initial_champion: str
+class ChampionAdd(BaseModel): champion_name: str
+class PlayerInMarket(BaseModel): id: int; player_tag: str; champions: list[str]
+class MarketDetails(BaseModel): id: int; name: str; invite_code: str; creator_id: str; tier: str; player_limit: int; champions_per_player_limit: int; players: list[PlayerInMarket]
 
-# Asynchronous startup event to load ML models into memory once
+# --- Global Tracker Instance & Startup Event ---
+tracker = PlayerStockTracker(RIOT_API_KEY)
 @app.on_event("startup")
 async def startup_event():
-    # We now call the async version of the model loader
     await tracker.load_models_async()
 
+# --- Helper Functions & Security ---
+def _generate_invite_code(length=8):
+    return ''.join(random.choices(string.ascii_uppercase + string.digits, k=length))
+
 async def verify_qstash_signature(request: Request):
-    """
-    Verifies that the incoming request is genuinely from QStash by checking
-    against both the current and next signing keys.
-    """
     signature = request.headers.get("Upstash-Signature")
-    if not signature:
-        raise HTTPException(status_code=401, detail="Signature header is missing")
-
+    if not signature: raise HTTPException(status_code=401, detail="Signature header is missing")
     body = await request.body()
-    
-    # Try verifying with the current key first
     h_current = hmac.new(QSTASH_CURRENT_SIGNING_KEY.encode(), body, hashlib.sha256)
-    expected_current = base64.b64encode(h_current.digest()).decode()
-    if hmac.compare_digest(expected_current, signature):
-        return True # Verification successful
-
-    # If that fails, try the next key
+    if hmac.compare_digest(base64.b64encode(h_current.digest()).decode(), signature): return True
     h_next = hmac.new(QSTASH_NEXT_SIGNING_KEY.encode(), body, hashlib.sha256)
-    expected_next = base64.b64encode(h_next.digest()).decode()
-    if hmac.compare_digest(expected_next, signature):
-        return True # Verification successful
-
-    # If both fail, the signature is invalid
+    if hmac.compare_digest(base64.b64encode(h_next.digest()).decode(), signature): return True
     raise HTTPException(status_code=401, detail="Invalid signature")
 
+# --- NEW: Health Check Endpoint for Render ---
+@app.get("/")
+async def health_check():
+    return {"status": "ok"}
+
+# --- QStash Task Endpoint (Internal) ---
+@app.post("/api/tasks/update-market", status_code=status.HTTP_202_ACCEPTED, include_in_schema=False)
+async def task_update_market(payload: dict, _=Depends(verify_qstash_signature)):
+    market_id = payload.get("market_id")
+    if not market_id: raise HTTPException(status_code=400, detail="market_id missing")
+    await tracker.update_market_stocks(market_id)
+    return {"status": "success"}
+
+# --- User-Facing API Endpoints ---
+@app.post("/api/markets/{market_id}/refresh")
+async def refresh_market(market_id: int):
+    conn = get_dict_connection()
+    try:
+        with conn.cursor() as c:
+            c.execute("SELECT last_refreshed_at, tier FROM markets WHERE id = %s", (market_id,))
+            market = c.fetchone()
+            if not market: raise HTTPException(status_code=404, detail="Market not found")
+            cooldown_minutes = 5 if market['tier'] in ['premium', 'pro'] else 10
+            if market['last_refreshed_at'] and (datetime.now(timezone.utc) - market['last_refreshed_at'] < timedelta(minutes=cooldown_minutes)):
+                raise HTTPException(status_code=429, detail="This market was refreshed recently.")
+            c.execute("UPDATE markets SET last_refreshed_at = %s WHERE id = %s", (datetime.now(timezone.utc), market_id))
+            conn.commit()
+    finally:
+        if conn: conn.close()
+    
+    destination_url = f"{APP_BASE_URL}/api/tasks/update-market"
+    headers = {"Authorization": f"Bearer {QSTASH_TOKEN}", "Upstash-Callback": destination_url}
+    payload = {"market_id": market_id}
+    try:
+        response = requests.post(QSTASH_URL, headers=headers, json=payload)
+        response.raise_for_status()
+    except requests.exceptions.RequestException as e:
+        print(f"!!! ERROR dispatching to QStash: {e}")
+        if e.response is not None: print(f"!!! QStash Response: {e.response.text}")
+        raise HTTPException(status_code=500, detail="Failed to schedule background task.")
+    
+    return {"status": "success", "message": "Refresh initiated."}
 
 # --- Helper Functions ---
 def _generate_invite_code(length=8):
@@ -95,59 +132,6 @@ class PlayerAdd(BaseModel):
 class ChampionAdd(BaseModel):
     champion_name: str
 
-# --- API Endpoints ---
-@app.post("/api/tasks/update-market", status_code=status.HTTP_202_ACCEPTED)
-async def task_update_market(payload: dict, _=Depends(verify_qstash_signature)):
-    """
-    This is the secure webhook that QStash calls to execute the job.
-    It runs the tracker logic directly.
-    """
-    market_id = payload.get("market_id")
-    if not market_id:
-        raise HTTPException(status_code=400, detail="market_id missing from payload")
-    
-    print(f"QStash task received for market {market_id}")
-    # We can run this directly because Render's Uvicorn server can handle
-    # long-running async tasks on its own worker threads.
-    await tracker.update_market_stocks(market_id)
-    return {"status": "success", "message": f"Task for market {market_id} completed."}
-
-
-# --- USER-FACING Refresh Endpoint (This calls QStash) ---
-@app.post("/api/markets/{market_id}/refresh")
-async def refresh_market(market_id: int):
-    """
-    Triggers a stock update for a market by dispatching a task to QStash.
-    """
-    # ... (Your cooldown logic remains here, unchanged)
-    conn = get_dict_connection()
-    try:
-        with conn.cursor() as c:
-            c.execute("UPDATE markets SET last_refreshed_at = %s WHERE id = %s", (datetime.now().astimezone(), market_id))
-            conn.commit()
-    finally:
-        conn.close()
-
-    # --- Dispatch the job to QStash ---
-    qstash_url = "https://qstash.upstash.io/v2/publish/"
-    # The "job" is the URL of our own secure task endpoint
-    destination_url = f"{APP_BASE_URL}/api/tasks/update-market"
-    
-    headers = {
-        "Authorization": f"Bearer {QSTASH_TOKEN}",
-        "Content-Type": "application/json",
-    }
-    # The payload QStash will send to our endpoint
-    payload = {"market_id": market_id}
-
-    response = requests.post(destination_url, headers=headers, json=payload)
-    
-    if response.status_code >= 300:
-        print("Error from QStash:", response.text)
-        raise HTTPException(status_code=500, detail="Failed to schedule task with QStash.")
-
-    print(f"Dispatched update task for market {market_id} to QStash.")
-    return {"status": "success", "message": f"Refresh initiated for market {market_id}."}
 
 @app.post("/api/markets/create", status_code=status.HTTP_201_CREATED)
 async def create_market(market_data: MarketCreate):
@@ -239,20 +223,15 @@ async def add_player_to_market(market_id: int, player_data: PlayerAdd):
                     detail=f"This player is in the max number of markets ({limit}) allowed by your subscription tier."
                 )
 
-            # Step 1: Add the player and get their unique ID for this market
+            # 4. Add the player and record WHO added them
             c.execute(
                 "INSERT INTO market_players (market_id, player_tag, listed_by_user_id) VALUES (%s, %s, %s) RETURNING id",
                 (market_id, player_data.player_tag, player_data.user_id)
             )
-            player_id = c.fetchone()['id'] # The variable is named player_id
+            player_id = c.fetchone()['id']
 
-            # Step 2: Add the initial champion to that player's pool
-            c.execute(
-                "INSERT INTO player_champions (market_player_id, champion_name) VALUES (%s, %s)",
-                (player_id, player_data.initial_champion)
-            )
-
-            # Step 3: Create the initial "IPO" price entry
+            # Step 3: Create the initial "IPO" price entry in the stock_values table
+            # --- THIS IS THE CORRECTED SQL INSERT ---
             c.execute("""
                 INSERT INTO stock_values 
                     (market_id, market_player_id, player_tag, champion, stock_value, model_score) 
@@ -261,22 +240,21 @@ async def add_player_to_market(market_id: int, player_data: PlayerAdd):
             """, 
             (
                 market_id, 
-                player_id, # <-- THE FIX: Use the correct variable name 'player_id'
+                market_player_id, # <-- THE FIX: Pass the ID we just created
                 player_data.player_tag, 
                 player_data.initial_champion, 
-                10.0,
-                5.0
+                10.0, # Default price
+                5.0   # Default score
             ))
             
             conn.commit()
-            # <-- THE FIX: Return the correct variable name 'player_id'
-            return {"status": "success", "player_id": player_id}
+            return {"status": "success", "player_id": market_player_id}
             
     except Exception as e:
         if conn: conn.rollback()
         if 'duplicate key value violates unique constraint' in str(e).lower():
-             raise HTTPException(status_code=409, detail="This player is already in this market.")
-        print(f"!!! ERROR in add_player_to_market: {e}")
+             raise HTTPException(status_code=409, detail="This player is already in the market.")
+        print(f"!!! ERROR in add_player_to_market: {e}") # Added logging
         raise HTTPException(status_code=500, detail="An internal server error occurred.")
     finally:
         if conn:
