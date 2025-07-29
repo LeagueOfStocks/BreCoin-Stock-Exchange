@@ -90,12 +90,13 @@ async def verify_qstash_signature(request: Request):
         )
         print(f"JWT decoded successfully with current key: {decoded}")
         
-        # The 'body' claim contains a base64-encoded SHA-256 hash of the request body
+        # The 'body' claim contains a URL-safe base64-encoded SHA-256 hash of the request body
         expected_body_hash_b64 = decoded.get("body", "")
         
         # Compute SHA-256 hash of the actual body
         actual_body_hash = hashlib.sha256(body).digest()
-        actual_body_hash_b64 = base64.b64encode(actual_body_hash).decode()
+        # Use URL-safe base64 encoding (with - and _ instead of + and /)
+        actual_body_hash_b64 = base64.urlsafe_b64encode(actual_body_hash).decode()
         
         print(f"Expected body hash (base64): {expected_body_hash_b64}")
         print(f"Actual body hash (base64):   {actual_body_hash_b64}")
@@ -122,12 +123,13 @@ async def verify_qstash_signature(request: Request):
         )
         print(f"JWT decoded successfully with next key: {decoded}")
         
-        # The 'body' claim contains a base64-encoded SHA-256 hash of the request body
+        # The 'body' claim contains a URL-safe base64-encoded SHA-256 hash of the request body
         expected_body_hash_b64 = decoded.get("body", "")
         
         # Compute SHA-256 hash of the actual body
         actual_body_hash = hashlib.sha256(body).digest()
-        actual_body_hash_b64 = base64.b64encode(actual_body_hash).decode()
+        # Use URL-safe base64 encoding (with - and _ instead of + and /)
+        actual_body_hash_b64 = base64.urlsafe_b64encode(actual_body_hash).decode()
         
         print(f"Expected body hash (base64): {expected_body_hash_b64}")
         print(f"Actual body hash (base64):   {actual_body_hash_b64}")
@@ -145,7 +147,6 @@ async def verify_qstash_signature(request: Request):
     
     print("ERROR: JWT verification failed with both keys")
     raise HTTPException(status_code=401, detail="Invalid signature")
-
 
 
 # --- NEW: Health Check Endpoint for Render ---
