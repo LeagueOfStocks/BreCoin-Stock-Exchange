@@ -116,6 +116,7 @@ async def refresh_market(market_id: int):
     try:
         publish_url = QSTASH_URL
         print(f"Dispatching task to QStash publish URL: {publish_url}")
+        print(f"QStash payload: {payload}")
         response = requests.post(publish_url, headers=headers, json=payload)
         response.raise_for_status()
     except requests.exceptions.RequestException as e:
