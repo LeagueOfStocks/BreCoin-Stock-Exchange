@@ -21,7 +21,7 @@ app = FastAPI()
 
 # --- Environment Variables ---
 RIOT_API_KEY = os.getenv("RIOT_API_KEY")
-QSTASH_URL = os.getenv("QSTASH_URL", "https://qstash.upstash.io/v2/publish/")
+QSTASH_URL = os.getenv("QSTASH_URL")
 QSTASH_TOKEN = os.getenv("QSTASH_TOKEN")
 QSTASH_CURRENT_SIGNING_KEY = os.getenv("QSTASH_CURRENT_SIGNING_KEY")
 QSTASH_NEXT_SIGNING_KEY = os.getenv("QSTASH_NEXT_SIGNING_KEY")
