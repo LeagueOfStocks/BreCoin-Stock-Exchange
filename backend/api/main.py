@@ -112,7 +112,6 @@ async def refresh_market(market_id: int):
         }
     }
 
-    
     try:
         # CORRECTED: Combine the base URL from .env with the specific endpoint path
         publish_url = QSTASH_URL
