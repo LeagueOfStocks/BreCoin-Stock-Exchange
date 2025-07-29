@@ -39,13 +39,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# --- Pydantic Models ---
-class MarketCreate(BaseModel): name: str; creator_id: str
-class MarketJoin(BaseModel): invite_code: str; user_id: str
-class PlayerAdd(BaseModel): player_tag: str; user_id: str; initial_champion: str
-class ChampionAdd(BaseModel): champion_name: str
-class PlayerInMarket(BaseModel): id: int; player_tag: str; champions: list[str]
-class MarketDetails(BaseModel): id: int; name: str; invite_code: str; creator_id: str; tier: str; player_limit: int; champions_per_player_limit: int; players: list[PlayerInMarket]
 
 # --- Global Tracker Instance & Startup Event ---
 tracker = PlayerStockTracker(RIOT_API_KEY)
@@ -83,31 +76,47 @@ async def task_update_market(payload: dict, _=Depends(verify_qstash_signature)):
 # --- User-Facing API Endpoints ---
 @app.post("/api/markets/{market_id}/refresh")
 async def refresh_market(market_id: int):
+    # --- Cooldown logic ---
     conn = get_dict_connection()
     try:
         with conn.cursor() as c:
             c.execute("SELECT last_refreshed_at, tier FROM markets WHERE id = %s", (market_id,))
             market = c.fetchone()
             if not market: raise HTTPException(status_code=404, detail="Market not found")
+            
             cooldown_minutes = 5 if market['tier'] in ['premium', 'pro'] else 10
             if market['last_refreshed_at'] and (datetime.now(timezone.utc) - market['last_refreshed_at'] < timedelta(minutes=cooldown_minutes)):
                 raise HTTPException(status_code=429, detail="This market was refreshed recently.")
+
             c.execute("UPDATE markets SET last_refreshed_at = %s WHERE id = %s", (datetime.now(timezone.utc), market_id))
             conn.commit()
     finally:
         if conn: conn.close()
     
+    # --- Dispatch job to QStash ---
     destination_url = f"{APP_BASE_URL}/api/tasks/update-market"
-    headers = {"Authorization": f"Bearer {QSTASH_TOKEN}", "Upstash-Callback": destination_url}
+    headers = {
+        "Authorization": f"Bearer {QSTASH_TOKEN}",
+        "Content-Type": "application/json",
+        "Upstash-Callback": destination_url
+    }
     payload = {"market_id": market_id}
+    
     try:
-        response = requests.post(QSTASH_URL, headers=headers, json=payload)
+        # CORRECTED: Combine the base URL from .env with the specific endpoint path
+        publish_url = f"{QSTASH_URL}/v2/publish/"
+        
+        print(f"Dispatching task to QStash publish URL: {publish_url}") # Added for debugging
+        
+        response = requests.post(publish_url, headers=headers, json=payload)
         response.raise_for_status()
     except requests.exceptions.RequestException as e:
-        print(f"!!! ERROR dispatching to QStash: {e}")
-        if e.response is not None: print(f"!!! QStash Response: {e.response.text}")
+        print(f"!!! ERROR dispatching task to QStash: {e}")
+        if e.response is not None:
+            print(f"!!! QStash Response Body: {e.response.text}")
         raise HTTPException(status_code=500, detail="Failed to schedule background task.")
     
+    print(f"Successfully dispatched update task for market {market_id} to QStash.")
     return {"status": "success", "message": "Refresh initiated."}
 
 # --- Helper Functions ---
