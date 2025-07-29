@@ -104,7 +104,7 @@ async def refresh_market(market_id: int):
     destination_url = f"{APP_BASE_URL}/api/tasks/update-market"
     
     # Method 1: Using destination as URL parameter (recommended)
-    publish_url = f"{QSTASH_URL}/{destination_url}"
+    publish_url = f"{QSTASH_URL.rstrip('/')}/v2/publish/{destination_url}"
     
     headers = {
         "Authorization": f"Bearer {QSTASH_TOKEN}",
