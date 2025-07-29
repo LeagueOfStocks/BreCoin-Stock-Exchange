@@ -46,7 +46,7 @@ SQLAlchemy==2.0.38
 greenlet==3.1.1
 
 # Machine Learning
-scikit-learn==1.7.1
+scikit-learn==1.6.1
 joblib==1.5.1
 scipy==1.16.1
 threadpoolctl==3.6.0

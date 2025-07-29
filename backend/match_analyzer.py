@@ -129,8 +129,8 @@ if __name__ == "__main__":
     # Example usage
     analyzer = MatchAnalyzer()
     
-    MATCH_ID = "NA1_5247080655"  
-    SUMMONER_NAME = "M K#vivi"  
+    MATCH_ID = "NA1_5333876232"  
+    SUMMONER_NAME = "Valyrian#NA2"  
     
     result = analyzer.get_match_data(MATCH_ID, SUMMONER_NAME)
     
