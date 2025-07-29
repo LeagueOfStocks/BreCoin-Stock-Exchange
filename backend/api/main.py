@@ -245,10 +245,9 @@ async def add_player_to_market(market_id: int, player_data: PlayerAdd):
                 "INSERT INTO market_players (market_id, player_tag, listed_by_user_id) VALUES (%s, %s, %s) RETURNING id",
                 (market_id, player_data.player_tag, player_data.user_id)
             )
-            player_id = c.fetchone()['id']
+            market_player_id = c.fetchone()['id']  # <-- THE FIX: Use correct variable name
 
             # Step 3: Create the initial "IPO" price entry in the stock_values table
-            # --- THIS IS THE CORRECTED SQL INSERT ---
             c.execute("""
                 INSERT INTO stock_values 
                     (market_id, market_player_id, player_tag, champion, stock_value, model_score) 
@@ -257,7 +256,7 @@ async def add_player_to_market(market_id: int, player_data: PlayerAdd):
             """, 
             (
                 market_id, 
-                market_player_id, # <-- THE FIX: Pass the ID we just created
+                market_player_id,  # <-- Now this matches the variable name
                 player_data.player_tag, 
                 player_data.initial_champion, 
                 10.0, # Default price
@@ -265,7 +264,7 @@ async def add_player_to_market(market_id: int, player_data: PlayerAdd):
             ))
             
             conn.commit()
-            return {"status": "success", "player_id": market_player_id}
+            return {"status": "success", "player_id": market_player_id}  # <-- Use correct variable
             
     except Exception as e:
         if conn: conn.rollback()
@@ -276,6 +275,7 @@ async def add_player_to_market(market_id: int, player_data: PlayerAdd):
     finally:
         if conn:
             conn.close()
+
 
 
 @app.post("/api/markets/players/{player_id}/champions", status_code=status.HTTP_201_CREATED)
