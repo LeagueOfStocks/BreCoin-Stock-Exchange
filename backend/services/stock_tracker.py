@@ -85,49 +85,6 @@ class PlayerStockTracker:
         finally:
             conn.close()
 
-    def update_job_status_in_db(self, job_id: str, status: str):
-        """Updates a job's status in the PostgreSQL job_status table."""
-        conn = get_connection()
-        try:
-            with conn.cursor() as c:
-                c.execute("UPDATE job_status SET status = %s, completed_at = now() WHERE id = %s", (status, job_id))
-                conn.commit()
-            print(f"Updated DB status for job {job_id} to '{status}'")
-        except Exception as e:
-            print(f"!!! FAILED to update DB job status for {job_id}: {e}")
-        finally:
-            if conn: conn.close()
-
-    async def update_market_stocks(self, market_id: int, job_id: str):
-        print(f"--- Background task started for job {job_id} (market: {market_id}) ---")
-        await self.load_models_async()
-        
-        try:
-            market_config, players_to_update = self.get_market_config_and_players(market_id)
-            if not players_to_update:
-                print(f"No players found for market {market_id}. Marking job as complete.")
-                self.update_job_status_in_db(job_id, 'completed')
-                return
-
-            async with aiohttp.ClientSession() as session:
-                tasks = [
-                    self.process_player(session, market_id, market_config, player_tag, data)
-                    for player_tag, data in players_to_update.items()
-                ]
-                await asyncio.gather(*tasks)
-            
-            # --- Mark job as completed on success ---
-            self.update_job_status_in_db(job_id, 'completed')
-            print(f"--- Finished job {job_id} successfully ---")
-
-        except Exception as e:
-            # --- Mark job as failed on any unexpected error ---
-            print(f"!!! UNEXPECTED CRASH in update_market_stocks for job {job_id}: {e}")
-            import traceback
-            traceback.print_exc()
-            self.update_job_status_in_db(job_id, 'failed')
-
-
     async def _api_request(self, session, url):
         """A helper to handle requests and potential rate limiting."""
         async with session.get(url, headers=self.headers) as response:

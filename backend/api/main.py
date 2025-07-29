@@ -13,7 +13,7 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, status, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-import aiohttp
+
 from lib.database import get_dict_connection
 from services.stock_tracker import PlayerStockTracker
 
@@ -157,53 +157,40 @@ async def health_check():
 # --- QStash Task Endpoint (Internal) ---
 @app.post("/api/tasks/update-market", status_code=status.HTTP_202_ACCEPTED, include_in_schema=False)
 async def task_update_market(request: Request, _=Depends(verify_qstash_signature)):
-    """
-    This is the secure webhook that QStash calls to execute the job.
-    """
-    # Get the unique job ID from the headers QStash provides
-    job_id = request.headers.get("Upstash-Message-Id")
+    print(f"=== QStash webhook received at {datetime.now()} ===")
     
     try:
+        # Get the JSON payload
         body = await request.json()
+        print(f"QStash payload received: {body}")
+        
         market_id = body.get("market_id")
-
-        if not job_id or not market_id:
-            # Log the error for debugging
-            print(f"ERROR: Webhook missing data. Job ID: {job_id}, Market ID: {market_id}")
-            raise HTTPException(status_code=400, detail="Missing Upstash-Message-Id header or market_id in payload")
+        if not market_id:
+            print("ERROR: market_id missing from payload")
+            raise HTTPException(status_code=400, detail="market_id missing")
         
-        print(f"QStash webhook received for job_id: {job_id}, market_id: {market_id}")
+        print(f"Starting stock update for market {market_id}")
+        await tracker.update_market_stocks(market_id)
+        print(f"Completed stock update for market {market_id}")
         
-        # This is the main workhorse call
-        await tracker.update_market_stocks(market_id, job_id)
+        return {"status": "success", "message": f"Updated market {market_id}"}
         
-        print(f"Successfully completed task for job_id: {job_id}")
-        return {"status": "success"}
-
     except Exception as e:
-        print(f"!!! FATAL ERROR during task execution for job_id {job_id}: {e}")
+        print(f"ERROR in task_update_market: {e}")
         import traceback
         traceback.print_exc()
-        
-        if job_id:
-            # We need to instantiate the tracker to use its method
-            temp_tracker = PlayerStockTracker(RIOT_API_KEY)
-            temp_tracker.update_job_status_in_db(job_id, 'failed')
-
-        # Return a 500 error to QStash so it knows the job failed.
-        raise HTTPException(status_code=500, detail=f"Internal Server Error during task execution: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 # --- User-Facing API Endpoints ---
 @app.post("/api/markets/{market_id}/refresh")
 async def refresh_market(market_id: int):
-    # --- Cooldown Logic ---
+    # --- Cooldown logic ---
     conn = get_dict_connection()
     try:
         with conn.cursor() as c:
             c.execute("SELECT last_refreshed_at, tier FROM markets WHERE id = %s", (market_id,))
             market = c.fetchone()
-            if not market:
-                raise HTTPException(status_code=404, detail="Market not found")
+            if not market: raise HTTPException(status_code=404, detail="Market not found")
             
             cooldown_minutes = 5 if market['tier'] in ['premium', 'pro'] else 10
             if market['last_refreshed_at'] and (datetime.now(timezone.utc) - market['last_refreshed_at'] < timedelta(minutes=cooldown_minutes)):
@@ -214,82 +201,32 @@ async def refresh_market(market_id: int):
     finally:
         if conn: conn.close()
     
-    # --- Dispatch Job to QStash and get Message ID ---
-    message_id = None
-    try:
-        publish_url = f"{QSTASH_URL}/v2/publish"
-        destination_url = f"{APP_BASE_URL}/api/tasks/update-market"
-        headers = {
-            "Authorization": f"Bearer {QSTASH_TOKEN}",
-            "Content-Type": "application/json",
-            "Upstash-Callback": destination_url
-        }
-        payload = {"market_id": market_id}
-
-        async with aiohttp.ClientSession() as session:
-            async with session.post(publish_url, headers=headers, json=payload) as response:
-                if response.status >= 300:
-                    error_text = await response.text()
-                    raise HTTPException(status_code=500, detail=f"QStash error: {error_text}")
-                
-                response_data = await response.json()
-                message_id = response_data.get("messageId")
-                if not message_id:
-                    raise HTTPException(status_code=500, detail="QStash did not return a messageId.")
-
-    except Exception as e:
-        print(f"!!! ERROR dispatching to QStash: {e}")
-        raise HTTPException(status_code=500, detail="Failed to schedule background task.")
+    # --- Dispatch job to QStash ---
+    destination_url = f"{APP_BASE_URL}/api/tasks/update-market"
     
-    # --- Log the new job in our PostgreSQL job_status table ---
-    conn_db = get_dict_connection()
+    # Method 1: Using destination as URL parameter (recommended)
+    publish_url = f"{QSTASH_URL.rstrip('/')}/v2/publish/{destination_url}"
+    
+    headers = {
+        "Authorization": f"Bearer {QSTASH_TOKEN}",
+        "Content-Type": "application/json"
+    }
+    
+    # The payload is just the body that will be sent to your webhook
+    payload = {"market_id": market_id}
+
     try:
-        with conn_db.cursor() as c:
-            c.execute("INSERT INTO job_status (id, status) VALUES (%s, %s)", (message_id, 'pending'))
-            conn_db.commit()
-    finally:
-        if conn_db: conn_db.close()
+        print(f"Dispatching task to QStash publish URL: {publish_url}")
+        response = requests.post(publish_url, headers=headers, json=payload)
+        response.raise_for_status()
+    except requests.exceptions.RequestException as e:
+        print(f"!!! ERROR dispatching task to QStash: {e}")
+        if e.response is not None:
+            print(f"!!! QStash Response Body: {e.response.text}")
+        raise HTTPException(status_code=500, detail="Failed to schedule background task.")
 
-    print(f"Successfully dispatched job {message_id} for market {market_id}.")
-    return {"status": "success", "message": "Refresh initiated.", "job_id": message_id}
-
-@app.get("/api/tasks/{job_id}/status")
-async def get_task_status(job_id: str):
-    """
-    Checks the status of a background job.
-    If the job is complete, it deletes the row after returning the status.
-    """
-    conn = get_dict_connection()
-    try:
-        with conn.cursor() as c:
-            # Begin a transaction
-            c.execute("BEGIN;")
-            
-            # Select the status, locking the row to prevent race conditions
-            c.execute("SELECT status FROM job_status WHERE id = %s FOR UPDATE;", (job_id,))
-            result = c.fetchone()
-            
-            if not result:
-                # Commit the transaction (even though nothing changed) and return
-                c.execute("COMMIT;")
-                return {"status": "not_found"}
-
-            status = result['status']
-            
-            # If the job is finished, delete the row
-            if status in ['completed', 'failed']:
-                c.execute("DELETE FROM job_status WHERE id = %s;", (job_id,))
-            
-            # Commit all changes (the potential delete)
-            c.execute("COMMIT;")
-            
-            return {"status": status}
-    except Exception as e:
-        if conn: conn.rollback() # Rollback on error
-        raise HTTPException(status_code=500, detail=f"Database error: {e}")
-    finally:
-        if conn:
-            conn.close()
+    print(f"Successfully dispatched update task for market {market_id} to QStash.")
+    return {"status": "success", "message": "Refresh initiated."}
 
 # --- Helper Functions ---
 def _generate_invite_code(length=8):
