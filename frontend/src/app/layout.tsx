@@ -2,7 +2,8 @@ import type { Metadata } from 'next'
 import { Inter } from 'next/font/google'
 import Navigation from '@/components/Navigation'
 import { AuthProvider } from './context/AuthContext'
-import { MarketProvider } from './context/MarketContext' // <-- IMPORT
+import { MarketProvider } from './context/MarketContext'
+import { NavigationProvider } from './context/NavigationContext'
 import { Toaster } from "@/components/ui/toaster"
 import './globals.css'
 
@@ -22,13 +23,15 @@ export default function RootLayout({
     <html lang="en">
       <body className={inter.className}>
         <AuthProvider>
-          <MarketProvider> {/* <-- WRAPPER START */}
-            <Navigation />
-            <main className="max-w-7xl mx-auto p-4">
-              {children}
-            </main>
-            <Toaster />
-          </MarketProvider> {/* <-- WRAPPER END */}
+          <MarketProvider>
+            <NavigationProvider>
+              <Navigation />
+              <main className="max-w-7xl mx-auto p-4">
+                {children}
+              </main>
+              <Toaster />
+            </NavigationProvider>
+          </MarketProvider>
         </AuthProvider>
       </body>
     </html>

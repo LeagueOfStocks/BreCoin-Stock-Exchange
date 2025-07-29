@@ -57,20 +57,29 @@ const PerformerRow = ({ stock, rank, marketId }: { stock: Performer, rank: numbe
 
 
 export default function TopPerformersPage() {
-    const { currentMarket } = useMarket();
+    const { currentMarket, initialized: marketInitialized } = useMarket();
     const [performers, setPerformers] = useState<{ top_performers: Performer[], bottom_performers: Performer[] }>({ top_performers: [], bottom_performers: [] });
     const [timeframe, setTimeframe] = useState('1m'); // Corresponds to 'month'
-    const [loading, setLoading] = useState(true);
+    const [loading, setLoading] = useState(false); // Start with false
+    const [initialized, setInitialized] = useState(false); // Track initialization
 
     useEffect(() => {
+        // Wait for market context to be initialized
+        if (!marketInitialized) return;
+
         if (!currentMarket) {
             setLoading(false);
+            setInitialized(true);
             setPerformers({ top_performers: [], bottom_performers: [] });
             return;
         }
 
         const fetchPerformers = async () => {
-            setLoading(true);
+            // Only show loading on first initialization
+            if (!initialized && performers.top_performers.length === 0 && performers.bottom_performers.length === 0) {
+                setLoading(true);
+            }
+            
             try {
                 // Pass the timeframe to our new, more powerful endpoint
                 const response = await fetch(`${API_URL}/api/markets/${currentMarket.id}/performers?period=${timeframe}`);
@@ -87,11 +96,22 @@ export default function TopPerformersPage() {
                 console.error('Error fetching performers:', error);
             } finally {
                 setLoading(false);
+                setInitialized(true);
             }
         };
 
         fetchPerformers();
-    }, [currentMarket, timeframe]); // Re-fetch when timeframe changes
+    }, [currentMarket, timeframe, marketInitialized, initialized, performers.top_performers.length, performers.bottom_performers.length]); // Re-fetch when timeframe changes
+
+    // Only show loading skeleton on initial load when market context is not ready
+    if (!marketInitialized || (loading && !initialized)) {
+        return (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                <Skeleton className="h-96" />
+                <Skeleton className="h-96" />
+            </div>
+        );
+    }
 
     if (!currentMarket) {
         return <div className="text-center py-20"><h2 className="text-xl font-semibold">Please select a market to view performers.</h2></div>
@@ -113,36 +133,29 @@ export default function TopPerformersPage() {
                 </TabsList>
             </Tabs>
       
-            {loading ? (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                    <Skeleton className="h-96" />
-                    <Skeleton className="h-96" />
-                </div>
-            ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                    <Card>
-                        <CardHeader><CardTitle className="flex items-center"><TrendingUp className="h-5 w-5 mr-2 text-green-500" /> Top Performers</CardTitle></CardHeader>
-                        <CardContent>
-                            {performers.top_performers.length > 0 ? (
-                                performers.top_performers.map((stock, i) => (
-                                    <PerformerRow key={`${stock.player_tag}-${stock.champion}`} stock={stock} rank={i + 1} marketId={currentMarket.id} />
-                                ))
-                            ) : <p className="text-center text-muted-foreground py-8">No performance data available for this period.</p>}
-                        </CardContent>
-                    </Card>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                <Card>
+                    <CardHeader><CardTitle className="flex items-center"><TrendingUp className="h-5 w-5 mr-2 text-green-500" /> Top Performers</CardTitle></CardHeader>
+                    <CardContent>
+                        {performers.top_performers.length > 0 ? (
+                            performers.top_performers.map((stock, i) => (
+                                <PerformerRow key={`${stock.player_tag}-${stock.champion}`} stock={stock} rank={i + 1} marketId={currentMarket.id} />
+                            ))
+                        ) : <p className="text-center text-muted-foreground py-8">No performance data available for this period.</p>}
+                    </CardContent>
+                </Card>
 
-                    <Card>
-                        <CardHeader><CardTitle className="flex items-center"><TrendingDown className="h-5 w-5 mr-2 text-red-500" /> Bottom Performers</CardTitle></CardHeader>
-                        <CardContent>
-                            {performers.bottom_performers.length > 0 ? (
-                                [...performers.bottom_performers].sort((a,b) => a.price_change_percent - b.price_change_percent).map((stock, i) => (
-                                     <PerformerRow key={`${stock.player_tag}-${stock.champion}`} stock={stock} rank={i + 1} marketId={currentMarket.id} />
-                                ))
-                            ) : <p className="text-center text-muted-foreground py-8">No performance data available for this period.</p>}
-                        </CardContent>
-                    </Card>
-                </div>
-            )}
+                <Card>
+                    <CardHeader><CardTitle className="flex items-center"><TrendingDown className="h-5 w-5 mr-2 text-red-500" /> Bottom Performers</CardTitle></CardHeader>
+                    <CardContent>
+                        {performers.bottom_performers.length > 0 ? (
+                            [...performers.bottom_performers].sort((a,b) => a.price_change_percent - b.price_change_percent).map((stock, i) => (
+                                 <PerformerRow key={`${stock.player_tag}-${stock.champion}`} stock={stock} rank={i + 1} marketId={currentMarket.id} />
+                            ))
+                        ) : <p className="text-center text-muted-foreground py-8">No performance data available for this period.</p>}
+                    </CardContent>
+                </Card>
+            </div>
         </div>
     );
 }

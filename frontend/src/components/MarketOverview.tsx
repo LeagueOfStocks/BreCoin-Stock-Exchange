@@ -3,6 +3,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { useMarket } from '@/app/context/MarketContext';
+import { useNavigation } from '@/app/context/NavigationContext';
 import { TrendingUp, Activity, ArrowUpRight, ArrowDownRight, RefreshCw } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -24,6 +25,7 @@ interface Stock {
 
 const MarketOverview = () => {
   const { currentMarket, initialized: marketInitialized } = useMarket();
+  const { isNavigating } = useNavigation();
   const { toast } = useToast();
   const router = useRouter();
   
@@ -65,7 +67,8 @@ const MarketOverview = () => {
     }
 
     // Only show loading skeleton on first load when we have no data and haven't initialized
-    if (!initialized && stocks.length === 0) {
+    // AND we're not currently navigating
+    if (!initialized && stocks.length === 0 && !isNavigating) {
         setLoading(true);
     }
 
@@ -97,7 +100,7 @@ const MarketOverview = () => {
         setLoading(false);
         setInitialized(true);
     }
-  }, [currentMarket?.id, initialized, stocks.length]);
+  }, [currentMarket?.id, initialized, stocks.length, isNavigating]);
 
   useEffect(() => {
     // Wait for market context to be initialized before fetching
@@ -137,8 +140,8 @@ const MarketOverview = () => {
     }
   };
 
-  // Only show loading skeleton on initial load when market context is not ready
-  if (!marketInitialized || (loading && !initialized)) {
+  // Only show loading skeleton on initial load when market context is not ready AND not navigating
+  if (!marketInitialized || (loading && !initialized && !isNavigating)) {
     return <div className="space-y-6"><Skeleton className="h-28 w-full" /><Skeleton className="h-96 w-full" /></div>
   }
 

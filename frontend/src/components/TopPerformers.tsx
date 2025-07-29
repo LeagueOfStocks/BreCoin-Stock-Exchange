@@ -17,12 +17,13 @@ const TopPerformers = () => {
     bottom_performers: [] 
   });
   const [timeframe, setTimeframe] = useState('month');
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false); // Start with false
+  const [initialized, setInitialized] = useState(false); // Track initialization
   
   useEffect(() => {
     const fetchPerformers = async () => {
-      // Only show loading state on initial load when we have no data
-      if (performers.top_performers.length === 0 && performers.bottom_performers.length === 0) {
+      // Only show loading state on initial load when we have no data and haven't initialized
+      if (!initialized && performers.top_performers.length === 0 && performers.bottom_performers.length === 0) {
         setLoading(true);
       }
       
@@ -34,13 +35,14 @@ const TopPerformers = () => {
         console.error('Error fetching performers:', error);
       } finally {
         setLoading(false);
+        setInitialized(true);
       }
     };
     
     fetchPerformers();
     const interval = setInterval(fetchPerformers, 60000); // Refresh every minute
     return () => clearInterval(interval);
-  }, [timeframe, performers.top_performers.length, performers.bottom_performers.length]);
+  }, [timeframe, initialized, performers.top_performers.length, performers.bottom_performers.length]);
 
   const PerformerRow = ({ stock, rank }) => (
     <div 
@@ -136,7 +138,8 @@ const TopPerformers = () => {
             </div>
           </CardHeader>
           <CardContent>
-            {loading ? (
+            {/* Only show skeletons on initial load */}
+            {loading && !initialized ? (
               Array(5).fill(0).map((_, i) => <PerformerSkeleton key={i} />)
             ) : (
               performers.top_performers.map((stock, i) => (
@@ -160,7 +163,8 @@ const TopPerformers = () => {
             </div>
           </CardHeader>
           <CardContent>
-            {loading ? (
+            {/* Only show skeletons on initial load */}
+            {loading && !initialized ? (
               Array(5).fill(0).map((_, i) => <PerformerSkeleton key={i} />)
             ) : (
               // Sort bottom performers by price change from most negative to least negative

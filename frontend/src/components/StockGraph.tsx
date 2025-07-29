@@ -19,22 +19,27 @@ interface StockDataPoint { stock_value: number; timestamp: string; }
 interface ModelScore { model_score: number; timestamp: string; stock_value: number; previous_stock_value: number | null; price_change: number; formatted_time: string; }
 
 const StockGraph = ({ playerTag, champion }: StockGraphProps) => {
-  const { currentMarket } = useMarket();
+  const { currentMarket, initialized: marketInitialized } = useMarket();
   const [period, setPeriod] = useState('1w');
   const [history, setHistory] = useState<StockDataPoint[]>([]);
   const [scores, setScores] = useState<ModelScore[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false); // Start with false
+  const [initialized, setInitialized] = useState(false); // Track initialization
 
   // Using useCallback to memoize the fetch function
   const fetchData = useCallback(async () => {
+    // Wait for market context to be initialized
+    if (!marketInitialized) return;
+
     // Wait until we have all the necessary pieces of information
     if (!currentMarket || !playerTag || !champion) {
         setLoading(false);
+        setInitialized(true);
         return;
     };
 
-    // Only show loading on initial load
-    if (history.length === 0 && scores.length === 0) {
+    // Only show loading skeleton on first load when we have no data and haven't initialized
+    if (!initialized && history.length === 0 && scores.length === 0) {
       setLoading(true);
     }
     
@@ -68,14 +73,16 @@ const StockGraph = ({ playerTag, champion }: StockGraphProps) => {
         setScores([]);  // Reset to empty on error
     } finally {
         setLoading(false);
+        setInitialized(true);
     }
-  }, [currentMarket, playerTag, champion, period, history.length, scores.length]); // Correct dependency array
+  }, [currentMarket, playerTag, champion, period, marketInitialized, initialized, history.length, scores.length]); // Correct dependency array
 
   useEffect(() => {
     fetchData();
   }, [fetchData]);
 
-  if (loading) {
+  // Only show loading skeleton on initial load when market context is not ready
+  if (!marketInitialized || (loading && !initialized)) {
     return <div className="space-y-4 p-8"><Skeleton className="h-48 w-full" /><Skeleton className="h-96 w-full" /></div>
   }
 

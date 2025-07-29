@@ -19,20 +19,25 @@ interface Stock {
 }
 
 export default function GraphIndexPage() {
-  const { currentMarket } = useMarket();
+  const { currentMarket, initialized: marketInitialized } = useMarket();
   const [stocks, setStocks] = useState<Stock[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false); // Start with false
+  const [initialized, setInitialized] = useState(false); // Track initialization
 
   useEffect(() => {
+    // Wait for market context to be initialized
+    if (!marketInitialized) return;
+
     if (!currentMarket) {
         setLoading(false);
+        setInitialized(true);
         setStocks([]);
         return;
     }
 
     const fetchStocks = async () => {
-      // Only show loading state if we don't have any stocks data yet
-      if (stocks.length === 0) {
+      // Only show loading skeleton on first load when we have no data and haven't initialized
+      if (!initialized && stocks.length === 0) {
         setLoading(true);
       }
       
@@ -45,13 +50,15 @@ export default function GraphIndexPage() {
         console.error('Error fetching stocks:', error);
       } finally {
         setLoading(false);
+        setInitialized(true);
       }
     };
 
     fetchStocks();
-  }, [currentMarket, stocks.length]);
+  }, [currentMarket, marketInitialized, initialized, stocks.length]);
 
-  if (loading) {
+  // Only show loading skeleton on initial load when market context is not ready
+  if (!marketInitialized || (loading && !initialized)) {
       return (
         <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3 p-8">
             <Skeleton className="h-48" />
