@@ -90,18 +90,21 @@ async def verify_qstash_signature(request: Request):
         )
         print(f"JWT decoded successfully with current key: {decoded}")
         
-        # Verify the body matches what's in the JWT
-        expected_body_b64 = decoded.get("body", "")
-        actual_body_b64 = base64.b64encode(body).decode()
+        # The 'body' claim contains a base64-encoded SHA-256 hash of the request body
+        expected_body_hash_b64 = decoded.get("body", "")
         
-        print(f"Expected body (base64): {expected_body_b64}")
-        print(f"Actual body (base64):   {actual_body_b64}")
+        # Compute SHA-256 hash of the actual body
+        actual_body_hash = hashlib.sha256(body).digest()
+        actual_body_hash_b64 = base64.b64encode(actual_body_hash).decode()
         
-        if expected_body_b64 == actual_body_b64:
-            print("SUCCESS: JWT verification and body match successful!")
+        print(f"Expected body hash (base64): {expected_body_hash_b64}")
+        print(f"Actual body hash (base64):   {actual_body_hash_b64}")
+        
+        if expected_body_hash_b64 == actual_body_hash_b64:
+            print("SUCCESS: JWT verification and body hash match successful!")
             return True
         else:
-            print("ERROR: Body doesn't match JWT claim")
+            print("ERROR: Body hash doesn't match JWT claim")
             
     except jwt.InvalidTokenError as e:
         print(f"Current key JWT verification failed: {e}")
@@ -119,18 +122,21 @@ async def verify_qstash_signature(request: Request):
         )
         print(f"JWT decoded successfully with next key: {decoded}")
         
-        # Verify the body matches what's in the JWT
-        expected_body_b64 = decoded.get("body", "")
-        actual_body_b64 = base64.b64encode(body).decode()
+        # The 'body' claim contains a base64-encoded SHA-256 hash of the request body
+        expected_body_hash_b64 = decoded.get("body", "")
         
-        print(f"Expected body (base64): {expected_body_b64}")
-        print(f"Actual body (base64):   {actual_body_b64}")
+        # Compute SHA-256 hash of the actual body
+        actual_body_hash = hashlib.sha256(body).digest()
+        actual_body_hash_b64 = base64.b64encode(actual_body_hash).decode()
         
-        if expected_body_b64 == actual_body_b64:
-            print("SUCCESS: JWT verification and body match successful!")
+        print(f"Expected body hash (base64): {expected_body_hash_b64}")
+        print(f"Actual body hash (base64):   {actual_body_hash_b64}")
+        
+        if expected_body_hash_b64 == actual_body_hash_b64:
+            print("SUCCESS: JWT verification and body hash match successful!")
             return True
         else:
-            print("ERROR: Body doesn't match JWT claim")
+            print("ERROR: Body hash doesn't match JWT claim")
             
     except jwt.InvalidTokenError as e:
         print(f"Next key JWT verification failed: {e}")
@@ -139,6 +145,7 @@ async def verify_qstash_signature(request: Request):
     
     print("ERROR: JWT verification failed with both keys")
     raise HTTPException(status_code=401, detail="Invalid signature")
+
 
 
 # --- NEW: Health Check Endpoint for Render ---
