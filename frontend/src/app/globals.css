@@ -6,6 +6,21 @@ body {
   font-family: Arial, Helvetica, sans-serif;
 }
 
+/* Prevent layout shifts during loading */
+.loading-skeleton {
+  animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+/* Smooth transitions for all navigation */
+* {
+  transition: opacity 0.15s ease-in-out;
+}
+
+/* Prevent flash of unstyled content */
+[data-nextjs-scroll-focus-boundary] {
+  display: contents;
+}
+
 @layer base {
   :root {
     --background: 0 0% 100%;

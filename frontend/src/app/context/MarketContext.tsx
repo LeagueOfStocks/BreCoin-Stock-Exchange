@@ -15,40 +15,44 @@ interface MarketContextType {
   selectMarket: (market: Market) => void;
   refreshUserMarkets: () => Promise<void>;
   loading: boolean;
+  initialized: boolean; // Add initialized state
 }
 
 const MarketContext = createContext<MarketContextType | null>(null);
 
 export const MarketProvider = ({ children }: { children: React.ReactNode }) => {
-  const { user } = useAuth();
+  const { user, isLoading: authLoading } = useAuth();
   const router = useRouter();
   const [userMarkets, setUserMarkets] = useState<Market[]>([]);
   const [currentMarket, setCurrentMarket] = useState<Market | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false); // Start with false
+  const [initialized, setInitialized] = useState(false);
 
   // This is the function that fetches the data
   const fetchUserMarkets = useCallback(async () => {
-    // --- STEP 2 ---
     console.log("[MarketContext] fetchUserMarkets called. Current user:", user?.id);
 
     if (!user) {
       console.log("[MarketContext] No user found. Resetting state and stopping.");
       setUserMarkets([]);
       setCurrentMarket(null);
-      setLoading(false); // We are no longer loading
+      setLoading(false);
+      setInitialized(true);
       return;
     }
 
-    setLoading(true);
+    // Only show loading if we haven't initialized yet
+    if (!initialized) {
+      setLoading(true);
+    }
+    
     const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
     try {
-      // --- STEP 3 ---
       console.log(`[MarketContext] Fetching from API: ${API_URL}/api/users/${user.id}/markets`);
       const response = await fetch(`${API_URL}/api/users/${user.id}/markets`);
       if (!response.ok) throw new Error('API fetch failed with status: ' + response.status);
       
       const markets: Market[] = await response.json();
-      // --- STEP 4 ---
       console.log("[MarketContext] API Response OK. Markets received:", markets);
 
       setUserMarkets(markets);
@@ -58,11 +62,9 @@ export const MarketProvider = ({ children }: { children: React.ReactNode }) => {
         const lastMarket = markets.find(m => m.id.toString() === lastSelectedMarketId);
         const newMarket = lastMarket || markets[0];
         setCurrentMarket(newMarket);
-        // --- STEP 5 (Path A) ---
         console.log("[MarketContext] Setting state: loading=false, currentMarket=", newMarket);
       } else {
         setCurrentMarket(null);
-        // --- STEP 5 (Path B) ---
         console.log("[MarketContext] Setting state: loading=false, currentMarket=null");
       }
     } catch (error) {
@@ -71,15 +73,18 @@ export const MarketProvider = ({ children }: { children: React.ReactNode }) => {
       setCurrentMarket(null);
     } finally {
       setLoading(false);
+      setInitialized(true);
     }
-  }, [user]);
+  }, [user, initialized]);
 
   // This useEffect hook is the entry point. It runs when the `user` object changes.
   useEffect(() => {
-    // --- STEP 1 ---
+    // Don't fetch if auth is still loading
+    if (authLoading) return;
+    
     console.log("[MarketContext] useEffect triggered. User has changed.", { user_id: user?.id });
     fetchUserMarkets();
-  }, [user, fetchUserMarkets]);
+  }, [user, fetchUserMarkets, authLoading]);
 
   const selectMarket = (market: Market) => {
     setCurrentMarket(market);
@@ -92,6 +97,7 @@ export const MarketProvider = ({ children }: { children: React.ReactNode }) => {
     selectMarket,
     refreshUserMarkets: fetchUserMarkets,
     loading,
+    initialized,
   };
 
   return (

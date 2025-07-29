@@ -4,18 +4,39 @@ import { useEffect } from 'react'
 import { useAuth } from './context/AuthContext'
 import { useRouter } from 'next/navigation'
 import MarketOverview from '@/components/MarketOverview'
+import { Skeleton } from '@/components/ui/skeleton'
 
 export default function Home() {
-  const { user } = useAuth()
+  const { user, isLoading } = useAuth()
   const router = useRouter()
 
   useEffect(() => {
-    if (!user) {
+    // Only redirect if we're not loading and there's no user
+    if (!isLoading && !user) {
       router.push('/login')
     }
-  }, [user, router])
+  }, [user, router, isLoading])
 
-  // Your editor now knows everything about the 'user' object!
-  // Try typing user. and see the autocompletion.
-  return user ? <MarketOverview /> : <div className="text-center p-8">Redirecting to login...</div>;
+  // Show loading skeleton while checking auth
+  if (isLoading) {
+    return (
+      <div className="space-y-6">
+        <Skeleton className="h-8 w-64" />
+        <Skeleton className="h-64 w-full" />
+        <Skeleton className="h-48 w-full" />
+      </div>
+    )
+  }
+
+  // Show content if user exists, otherwise show loading message
+  if (user) {
+    return <MarketOverview />
+  }
+
+  // This will only show briefly before redirect
+  return (
+    <div className="text-center p-8">
+      <div className="animate-pulse">Redirecting to login...</div>
+    </div>
+  )
 }

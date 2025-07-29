@@ -5,10 +5,11 @@ import { usePathname } from 'next/navigation'
 import { useAuth } from '@/app/context/AuthContext' 
 import { Button } from '@/components/ui/button'
 import MarketSelector from './MarketSelector' 
+import { Skeleton } from '@/components/ui/skeleton'
 
 const Navigation = () => {
   const pathname = usePathname()
-  const { user, signOut } = useAuth()
+  const { user, signOut, isLoading } = useAuth()
 
   // Helper function for nav link classes to avoid repetition
   const getLinkClassName = (path: string, isPrefix: boolean = false) => {
@@ -22,10 +23,9 @@ const Navigation = () => {
     <nav className="bg-white shadow mb-4">
       <div className="max-w-7xl mx-auto px-4">
         <div className="flex justify-between items-center h-16">
-          <div className="flex items-center"> {/* Group the links and selector together */}
+          <div className="flex items-center">
             {user && (
               <div className="flex items-center gap-2">
-                {/* Your Existing Links */}
                 <Link href="/" className={getLinkClassName('/')}>
                   Market Overview
                   <span className="absolute bottom-0 left-0 w-0 h-0.5 bg-blue-500 group-hover:w-full transition-all duration-300"/>
@@ -49,15 +49,16 @@ const Navigation = () => {
               </div>
             )}
           </div>
-          <div className="flex items-center gap-4"> {/* Right side of the nav */}
-            {user ? (
+          <div className="flex items-center gap-4">
+            {isLoading ? (
+              <Skeleton className="h-9 w-20" />
+            ) : user ? (
               <>
-                <MarketSelector /> {/* Add the selector here */}
+                <MarketSelector />
                 <Button variant="outline" onClick={signOut}>Logout</Button>
               </>
             ) : (
-                // Only show login button if not already on the login page
-                pathname !== '/login' && <Link href="/login"><Button>Login</Button></Link>
+              pathname !== '/login' && <Link href="/login"><Button>Login</Button></Link>
             )}
           </div>
         </div>

@@ -12,6 +12,7 @@ interface AuthContextType {
   signUp: (credentials: SignUpWithPasswordCredentials) => Promise<AuthResponse>;
   signIn: (credentials: SignInWithPasswordCredentials) => Promise<AuthResponse>;
   signOut: () => Promise<{ error: AuthError | null }>;
+  isLoading: boolean; // Export loading state for components that need it
 }
 
 // Create the context with an initial value of null
@@ -20,13 +21,21 @@ const AuthContext = createContext<AuthContextType | null>(null)
 export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const [user, setUser] = useState<User | null>(null)
   const [loading, setLoading] = useState(true)
+  const [initialized, setInitialized] = useState(false)
   const router = useRouter()
 
   useEffect(() => {
     const getSession = async () => {
-      const { data: { session } } = await supabase.auth.getSession()
-      setUser(session?.user ?? null)
-      setLoading(false)
+      try {
+        const { data: { session } } = await supabase.auth.getSession()
+        setUser(session?.user ?? null)
+      } catch (error) {
+        console.error('Error getting session:', error)
+        setUser(null)
+      } finally {
+        setLoading(false)
+        setInitialized(true)
+      }
     }
     
     getSession()
@@ -55,11 +64,13 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     signIn: (data) => supabase.auth.signInWithPassword(data),
     signOut: () => supabase.auth.signOut(),
     user,
+    isLoading: loading, // Expose loading state
   }
 
+  // Always render children, let individual components handle loading states
   return (
     <AuthContext.Provider value={value}>
-      {!loading && children}
+      {children}
     </AuthContext.Provider>
   )
 }
