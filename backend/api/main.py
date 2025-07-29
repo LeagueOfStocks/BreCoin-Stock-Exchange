@@ -100,18 +100,22 @@ async def refresh_market(market_id: int):
     finally:
         if conn: conn.close()
     
-    # --- Dispatch job to QStash ---
     destination_url = f"{APP_BASE_URL}/api/tasks/update-market"
     headers = {
         "Authorization": f"Bearer {QSTASH_TOKEN}",
-        "Content-Type": "application/json",
-        "Upstash-Callback": destination_url
+        "Content-Type": "application/json"
     }
-    payload = {"market_id": market_id}
+    payload = {
+        "destination": destination_url,  # ✅ required for v2
+        "body": {
+            "market_id": market_id
+        }
+    }
+
     
     try:
         # CORRECTED: Combine the base URL from .env with the specific endpoint path
-        publish_url = f"{QSTASH_URL}/v2/publish/"
+        publish_url = QSTASH_URL
         
         print(f"Dispatching task to QStash publish URL: {publish_url}") # Added for debugging
         
