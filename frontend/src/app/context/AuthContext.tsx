@@ -1,6 +1,6 @@
 'use client'
 
-import { createContext, useState, useEffect, useContext } from 'react'
+import { createContext, useState, useEffect, useContext, useRef } from 'react'
 import { supabase } from '@/utils/supabase'
 import { useRouter } from 'next/navigation'
 // Import all the necessary types from Supabase
@@ -18,21 +18,39 @@ interface AuthContextType {
 // Create the context with an initial value of null
 const AuthContext = createContext<AuthContextType | null>(null)
 
+// Create a singleton to track if auth has been initialized
+let authInitialized = false;
+let initialUser: User | null = null;
+
 export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
-  const [user, setUser] = useState<User | null>(null)
-  const [loading, setLoading] = useState(true)
+  const [user, setUser] = useState<User | null>(initialUser)
+  const [loading, setLoading] = useState(!authInitialized) // Only load if not initialized
   const router = useRouter()
+  const initializingRef = useRef(false)
 
   useEffect(() => {
+    // Prevent multiple initialization
+    if (authInitialized || initializingRef.current) {
+      return;
+    }
+    
+    initializingRef.current = true;
+
     const getSession = async () => {
       try {
         const { data: { session } } = await supabase.auth.getSession()
-        setUser(session?.user ?? null)
+        const sessionUser = session?.user ?? null;
+        setUser(sessionUser)
+        initialUser = sessionUser; // Cache the user globally
+        authInitialized = true; // Mark as initialized
       } catch (error) {
         console.error('Error getting session:', error)
         setUser(null)
+        initialUser = null;
+        authInitialized = true;
       } finally {
         setLoading(false)
+        initializingRef.current = false;
       }
     }
     
@@ -41,7 +59,9 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     // Correctly destructure the subscription object
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       (event, session) => {
-        setUser(session?.user ?? null)
+        const newUser = session?.user ?? null;
+        setUser(newUser)
+        initialUser = newUser; // Keep global cache updated
         setLoading(false)
         if (event === 'SIGNED_OUT') {
             router.push('/login')
@@ -62,7 +82,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     signIn: (data) => supabase.auth.signInWithPassword(data),
     signOut: () => supabase.auth.signOut(),
     user,
-    isLoading: loading, // Expose loading state
+    isLoading: loading && !authInitialized, // Only show loading if truly not initialized
   }
 
   // Always render children, let individual components handle loading states

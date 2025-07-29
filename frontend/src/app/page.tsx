@@ -2,14 +2,12 @@
 
 import { useEffect } from 'react'
 import { useAuth } from './context/AuthContext'
-import { useNavigation } from './context/NavigationContext'
 import { useRouter } from 'next/navigation'
 import MarketOverview from '@/components/MarketOverview'
 import { Skeleton } from '@/components/ui/skeleton'
 
 export default function Home() {
   const { user, isLoading } = useAuth()
-  const { isNavigating } = useNavigation()
   const router = useRouter()
 
   useEffect(() => {
@@ -19,8 +17,8 @@ export default function Home() {
     }
   }, [user, router, isLoading])
 
-  // Show loading skeleton while checking auth, but not during navigation
-  if (isLoading && !isNavigating) {
+  // Only show loading skeleton on very initial load
+  if (isLoading) {
     return (
       <div className="space-y-6">
         <Skeleton className="h-8 w-64" />

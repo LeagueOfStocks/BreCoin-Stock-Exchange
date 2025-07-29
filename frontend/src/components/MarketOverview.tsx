@@ -3,7 +3,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { useMarket } from '@/app/context/MarketContext';
-import { useNavigation } from '@/app/context/NavigationContext';
 import { TrendingUp, Activity, ArrowUpRight, ArrowDownRight, RefreshCw } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -23,9 +22,11 @@ interface Stock {
     last_update: string;
 }
 
+// Singleton to track if MarketOverview has been rendered before
+let hasRenderedBefore = false;
+
 const MarketOverview = () => {
   const { currentMarket, initialized: marketInitialized } = useMarket();
-  const { isNavigating } = useNavigation();
   const { toast } = useToast();
   const router = useRouter();
   
@@ -37,7 +38,7 @@ const MarketOverview = () => {
     lastRefreshed: null as string | null,
   });
   const [loading, setLoading] = useState(false); // Start with false
-  const [initialized, setInitialized] = useState(false); // Track if component has been initialized
+  const [initialized, setInitialized] = useState(hasRenderedBefore); // Use global state
   const [isRefreshing, setIsRefreshing] = useState(false);
   const pollIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -63,12 +64,12 @@ const MarketOverview = () => {
         setLoading(false);
         setStocks([]);
         setInitialized(true);
+        hasRenderedBefore = true;
         return;
     }
 
-    // Only show loading skeleton on first load when we have no data and haven't initialized
-    // AND we're not currently navigating
-    if (!initialized && stocks.length === 0 && !isNavigating) {
+    // Only show loading skeleton on true first load
+    if (!initialized && !hasRenderedBefore) {
         setLoading(true);
     }
 
@@ -99,8 +100,9 @@ const MarketOverview = () => {
         // Always set loading to false after a fetch attempt
         setLoading(false);
         setInitialized(true);
+        hasRenderedBefore = true;
     }
-  }, [currentMarket?.id, initialized, stocks.length, isNavigating]);
+  }, [currentMarket?.id, initialized]);
 
   useEffect(() => {
     // Wait for market context to be initialized before fetching
@@ -111,6 +113,7 @@ const MarketOverview = () => {
     } else {
         // If no market is selected, mark as initialized without loading
         setInitialized(true);
+        hasRenderedBefore = true;
         setLoading(false);
     }
   }, [currentMarket?.id, fetchData, marketInitialized]);
@@ -140,8 +143,8 @@ const MarketOverview = () => {
     }
   };
 
-  // Only show loading skeleton on initial load when market context is not ready AND not navigating
-  if (!marketInitialized || (loading && !initialized && !isNavigating)) {
+  // Only show loading skeleton on true initial load
+  if (!marketInitialized || (loading && !initialized && !hasRenderedBefore)) {
     return <div className="space-y-6"><Skeleton className="h-28 w-full" /><Skeleton className="h-96 w-full" /></div>
   }
 
