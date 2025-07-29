@@ -25,16 +25,7 @@ APP_BASE_URL = os.getenv("APP_BASE_URL")
 
 # --- App Setup ---
 load_dotenv()
-from fastapi.routing import APIRouter
-
-# Create a router that is not strict about trailing slashes
-router = APIRouter(strict_slashes=False)
-# Pass this router into the FastAPI constructor
 app = FastAPI()
-
-# Mount the router to the app
-app.include_router(router)
-
 
 
 app.add_middleware(
@@ -137,29 +128,25 @@ async def refresh_market(market_id: int):
     finally:
         conn.close()
 
-    # Dispatch job to QStash
+    # --- Dispatch the job to QStash ---
+    qstash_url = "https://qstash.upstash.io/v2/publish/"
+    # The "job" is the URL of our own secure task endpoint
     destination_url = f"{APP_BASE_URL}/api/tasks/update-market"
+    
     headers = {
         "Authorization": f"Bearer {QSTASH_TOKEN}",
         "Content-Type": "application/json",
-        "Upstash-Callback": destination_url # Best practice to use the dedicated callback header
     }
+    # The payload QStash will send to our endpoint
     payload = {"market_id": market_id}
-    
-    print(f"Attempting to dispatch task to QStash. Callback URL is: {destination_url}") # <-- ADD THIS LOG
 
-    try:
-        # Use the generic publish URL
-        response = requests.post(QSTASH_URL, headers=headers, json=payload)
-        response.raise_for_status() # Raise an exception for bad status codes (4xx or 5xx)
-    except requests.exceptions.RequestException as e:
-        # This will catch network errors and bad status codes
-        print(f"!!! ERROR dispatching task to QStash: {e}")
-        if e.response is not None:
-            print(f"!!! QStash Response Body: {e.response.text}") # <-- THIS LOG IS CRITICAL
-        raise HTTPException(status_code=500, detail="Failed to schedule task with QStash.")
+    response = requests.post(destination_url, headers=headers, json=payload)
     
-    print(f"Successfully dispatched update task for market {market_id} to QStash.")
+    if response.status_code >= 300:
+        print("Error from QStash:", response.text)
+        raise HTTPException(status_code=500, detail="Failed to schedule task with QStash.")
+
+    print(f"Dispatched update task for market {market_id} to QStash.")
     return {"status": "success", "message": f"Refresh initiated for market {market_id}."}
 
 @app.post("/api/markets/create", status_code=status.HTTP_201_CREATED)
