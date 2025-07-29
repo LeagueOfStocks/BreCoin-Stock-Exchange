@@ -6,6 +6,8 @@ import hashlib
 import base64
 from datetime import datetime, timedelta, timezone
 import json
+import jwt
+import base64
 import requests
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, status, Depends, Request
@@ -58,14 +60,86 @@ def _generate_invite_code(length=8):
     return ''.join(random.choices(string.ascii_uppercase + string.digits, k=length))
 
 async def verify_qstash_signature(request: Request):
-    signature = request.headers.get("Upstash-Signature")
-    if not signature: raise HTTPException(status_code=401, detail="Signature header is missing")
+    print(f"=== JWT SIGNATURE VERIFICATION ===")
+    
+    # Get the JWT signature from headers
+    jwt_signature = request.headers.get("Upstash-Signature")
+    print(f"Received JWT signature: {jwt_signature}")
+    
+    if not jwt_signature:
+        print("ERROR: No Upstash-Signature header found")
+        raise HTTPException(status_code=401, detail="Signature header is missing")
+    
+    # Get the request body
     body = await request.body()
-    h_current = hmac.new(QSTASH_CURRENT_SIGNING_KEY.encode(), body, hashlib.sha256)
-    if hmac.compare_digest(base64.b64encode(h_current.digest()).decode(), signature): return True
-    h_next = hmac.new(QSTASH_NEXT_SIGNING_KEY.encode(), body, hashlib.sha256)
-    if hmac.compare_digest(base64.b64encode(h_next.digest()).decode(), signature): return True
+    print(f"Request body: {body}")
+    
+    # Check environment variables
+    if not QSTASH_CURRENT_SIGNING_KEY or not QSTASH_NEXT_SIGNING_KEY:
+        print("ERROR: Missing signing keys in environment")
+        raise HTTPException(status_code=500, detail="Server configuration error")
+    
+    # Try to verify the JWT with current signing key
+    try:
+        print("=== Trying CURRENT signing key ===")
+        # Decode and verify the JWT
+        decoded = jwt.decode(
+            jwt_signature, 
+            QSTASH_CURRENT_SIGNING_KEY, 
+            algorithms=["HS256"]
+        )
+        print(f"JWT decoded successfully with current key: {decoded}")
+        
+        # Verify the body matches what's in the JWT
+        expected_body_b64 = decoded.get("body", "")
+        actual_body_b64 = base64.b64encode(body).decode()
+        
+        print(f"Expected body (base64): {expected_body_b64}")
+        print(f"Actual body (base64):   {actual_body_b64}")
+        
+        if expected_body_b64 == actual_body_b64:
+            print("SUCCESS: JWT verification and body match successful!")
+            return True
+        else:
+            print("ERROR: Body doesn't match JWT claim")
+            
+    except jwt.InvalidTokenError as e:
+        print(f"Current key JWT verification failed: {e}")
+    except Exception as e:
+        print(f"Error with current key: {e}")
+    
+    # Try with next signing key
+    try:
+        print("=== Trying NEXT signing key ===")
+        # Decode and verify the JWT
+        decoded = jwt.decode(
+            jwt_signature, 
+            QSTASH_NEXT_SIGNING_KEY, 
+            algorithms=["HS256"]
+        )
+        print(f"JWT decoded successfully with next key: {decoded}")
+        
+        # Verify the body matches what's in the JWT
+        expected_body_b64 = decoded.get("body", "")
+        actual_body_b64 = base64.b64encode(body).decode()
+        
+        print(f"Expected body (base64): {expected_body_b64}")
+        print(f"Actual body (base64):   {actual_body_b64}")
+        
+        if expected_body_b64 == actual_body_b64:
+            print("SUCCESS: JWT verification and body match successful!")
+            return True
+        else:
+            print("ERROR: Body doesn't match JWT claim")
+            
+    except jwt.InvalidTokenError as e:
+        print(f"Next key JWT verification failed: {e}")
+    except Exception as e:
+        print(f"Error with next key: {e}")
+    
+    print("ERROR: JWT verification failed with both keys")
     raise HTTPException(status_code=401, detail="Invalid signature")
+
 
 # --- NEW: Health Check Endpoint for Render ---
 @app.get("/")
@@ -74,93 +148,30 @@ async def health_check():
 
 # --- QStash Task Endpoint (Internal) ---
 @app.post("/api/tasks/update-market", status_code=status.HTTP_202_ACCEPTED, include_in_schema=False)
-async def task_update_market(request: Request):
+async def task_update_market(request: Request, _=Depends(verify_qstash_signature)):
     print(f"=== QStash webhook received at {datetime.now()} ===")
-    print(f"Request method: {request.method}")
-    print(f"Request URL: {request.url}")
-    print(f"Request headers: {dict(request.headers)}")
     
-    # Get the signature from headers
-    signature = request.headers.get("Upstash-Signature")
-    print(f"Upstash-Signature header: {signature}")
-    
-    # Get the raw body
-    body = await request.body()
-    print(f"Raw body: {body}")
-    print(f"Body type: {type(body)}")
-    print(f"Body length: {len(body)}")
-    
-    # Check environment variables
-    print(f"QSTASH_CURRENT_SIGNING_KEY: {QSTASH_CURRENT_SIGNING_KEY}")
-    print(f"QSTASH_NEXT_SIGNING_KEY: {QSTASH_NEXT_SIGNING_KEY}")
-    
-    if not signature:
-        print("ERROR: No Upstash-Signature header found")
-        return {"error": "No signature header", "status": "failed"}
-    
-    if not QSTASH_CURRENT_SIGNING_KEY or not QSTASH_NEXT_SIGNING_KEY:
-        print("ERROR: Missing signing keys in environment")
-        return {"error": "Missing signing keys", "status": "failed"}
-    
-    # Manual signature verification with detailed logging
     try:
-        # Try current key
-        print("=== Trying CURRENT signing key ===")
-        h_current = hmac.new(QSTASH_CURRENT_SIGNING_KEY.encode(), body, hashlib.sha256)
-        current_digest = h_current.digest()
-        current_signature = base64.b64encode(current_digest).decode()
-        print(f"Computed current signature: {current_signature}")
-        print(f"Received signature:        {signature}")
-        print(f"Current signatures match: {hmac.compare_digest(current_signature, signature)}")
+        # Get the JSON payload
+        body = await request.json()
+        print(f"QStash payload received: {body}")
         
-        if hmac.compare_digest(current_signature, signature):
-            print("SUCCESS: Current signature verification passed!")
-        else:
-            # Try next key
-            print("=== Trying NEXT signing key ===")
-            h_next = hmac.new(QSTASH_NEXT_SIGNING_KEY.encode(), body, hashlib.sha256)
-            next_digest = h_next.digest()
-            next_signature = base64.b64encode(next_digest).decode()
-            print(f"Computed next signature: {next_signature}")
-            print(f"Next signatures match: {hmac.compare_digest(next_signature, signature)}")
-            
-            if hmac.compare_digest(next_signature, signature):
-                print("SUCCESS: Next signature verification passed!")
-            else:
-                print("ERROR: Neither signature matched - verification failed")
-                return {"error": "Invalid signature", "status": "failed"}
-        
-        # If we get here, signature verification passed
-        print("=== Signature verification successful, processing request ===")
-        
-        # Parse the JSON body
-        try:
-            import json
-            payload = json.loads(body.decode('utf-8'))
-            print(f"Parsed payload: {payload}")
-        except Exception as e:
-            print(f"ERROR parsing JSON payload: {e}")
-            return {"error": "Invalid JSON payload", "status": "failed"}
-        
-        market_id = payload.get("market_id")
+        market_id = body.get("market_id")
         if not market_id:
             print("ERROR: market_id missing from payload")
-            return {"error": "market_id missing", "status": "failed"}
+            raise HTTPException(status_code=400, detail="market_id missing")
         
         print(f"Starting stock update for market {market_id}")
-        
-        # Actually run the stock update
         await tracker.update_market_stocks(market_id)
-        
         print(f"Completed stock update for market {market_id}")
+        
         return {"status": "success", "message": f"Updated market {market_id}"}
         
     except Exception as e:
         print(f"ERROR in task_update_market: {e}")
         import traceback
         traceback.print_exc()
-        return {"error": str(e), "status": "failed"}
-
+        raise HTTPException(status_code=500, detail=str(e))
 
 # --- User-Facing API Endpoints ---
 @app.post("/api/markets/{market_id}/refresh")
