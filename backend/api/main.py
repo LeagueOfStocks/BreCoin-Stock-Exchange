@@ -5,7 +5,7 @@ import hmac
 import hashlib
 import base64
 from datetime import datetime, timedelta, timezone
-import aiohttp
+
 import requests
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, status, Depends, Request
@@ -83,55 +83,31 @@ async def task_update_market(payload: dict, _=Depends(verify_qstash_signature)):
 # --- User-Facing API Endpoints ---
 @app.post("/api/markets/{market_id}/refresh")
 async def refresh_market(market_id: int):
-    print(f"--- REFRESH endpoint triggered for market {market_id} ---")
-    conn = None
+    conn = get_dict_connection()
     try:
-        conn = get_dict_connection()
         with conn.cursor() as c:
             c.execute("SELECT last_refreshed_at, tier FROM markets WHERE id = %s", (market_id,))
             market = c.fetchone()
             if not market: raise HTTPException(status_code=404, detail="Market not found")
-            
             cooldown_minutes = 5 if market['tier'] in ['premium', 'pro'] else 10
             if market['last_refreshed_at'] and (datetime.now(timezone.utc) - market['last_refreshed_at'] < timedelta(minutes=cooldown_minutes)):
                 raise HTTPException(status_code=429, detail="This market was refreshed recently.")
-
             c.execute("UPDATE markets SET last_refreshed_at = %s WHERE id = %s", (datetime.now(timezone.utc), market_id))
             conn.commit()
-    except Exception as e:
-        print(f"!!! CRASH during database operations: {e}")
-        raise HTTPException(status_code=500, detail=f"Database error: {e}")
     finally:
         if conn: conn.close()
-
-    # --- NEW: Use aiohttp for the outbound call ---
+    
+    destination_url = f"{APP_BASE_URL}/api/tasks/update-market"
+    headers = {"Authorization": f"Bearer {QSTASH_TOKEN}", "Upstash-Callback": destination_url}
+    payload = {"market_id": market_id}
     try:
-        print("Dispatching task to QStash...")
-        destination_url = f"{APP_BASE_URL}/api/tasks/update-market"
-        headers = {
-            "Authorization": f"Bearer {QSTASH_TOKEN}",
-            "Content-Type": "application/json",
-            "Upstash-Callback": destination_url
-        }
-        payload = {"market_id": market_id}
-
-        async with aiohttp.ClientSession() as session:
-            async with session.post(QSTASH_URL, headers=headers, json=payload) as response:
-                if response.status >= 300:
-                    # Await the response text to see the error from QStash
-                    error_text = await response.text()
-                    print(f"!!! ERROR dispatching to QStash. Status: {response.status}, Body: {error_text}")
-                    raise HTTPException(status_code=500, detail=f"Failed to schedule task with QStash: {error_text}")
-                
-                # Await the response to ensure it's processed before moving on
-                await response.json()
-
-        print(f"Successfully dispatched update task for market {market_id} to QStash.")
-    except Exception as e:
-        print(f"!!! UNEXPECTED CRASH during QStash dispatch: {e}")
-        # This will catch any error, including timeouts or failed connections.
-        raise HTTPException(status_code=500, detail="An unexpected error occurred while queueing the task.")
-
+        response = requests.post(QSTASH_URL, headers=headers, json=payload)
+        response.raise_for_status()
+    except requests.exceptions.RequestException as e:
+        print(f"!!! ERROR dispatching to QStash: {e}")
+        if e.response is not None: print(f"!!! QStash Response: {e.response.text}")
+        raise HTTPException(status_code=500, detail="Failed to schedule background task.")
+    
     return {"status": "success", "message": "Refresh initiated."}
 
 # --- Helper Functions ---
