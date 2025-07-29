@@ -348,6 +348,11 @@ async def add_player_to_market(market_id: int, player_data: PlayerAdd):
             )
             market_player_id = c.fetchone()['id']  # <-- THE FIX: Use correct variable name
 
+            c.execute(
+                "INSERT INTO player_champions (market_player_id, champion_name) VALUES (%s, %s)",
+                (market_player_id, player_data.initial_champion)
+            )
+
             # Step 3: Create the initial "IPO" price entry in the stock_values table
             c.execute("""
                 INSERT INTO stock_values 
