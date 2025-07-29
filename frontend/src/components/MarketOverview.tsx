@@ -89,10 +89,10 @@ const MarketOverview = () => {
   }, [currentMarket]);
 
   useEffect(() => {
-    fetchData();
-    const interval = setInterval(fetchData, 60000);
-    return () => clearInterval(interval);
-  }, [fetchData]);
+    if (currentMarket) {
+        fetchData();
+    }
+  }, [fetchData, currentMarket]); 
   
   const handleRefresh = async () => {
     if (!currentMarket) return;
