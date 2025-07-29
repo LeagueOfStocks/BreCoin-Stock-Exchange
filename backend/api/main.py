@@ -121,8 +121,9 @@ async def refresh_market(market_id: int):
         if e.response is not None:
             print(f"!!! QStash Response Body: {e.response.text}")
         raise HTTPException(status_code=500, detail="Failed to schedule background task.")
-
+    print(f"Destination URL being sent to QStash: '{destination_url}'")
     
+
     print(f"Successfully dispatched update task for market {market_id} to QStash.")
     return {"status": "success", "message": "Refresh initiated."}
 
