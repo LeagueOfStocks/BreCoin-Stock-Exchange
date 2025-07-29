@@ -24,7 +24,6 @@ export default function GraphIndexPage() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // If no market is selected, don't fetch anything.
     if (!currentMarket) {
         setLoading(false);
         setStocks([]);
@@ -32,9 +31,12 @@ export default function GraphIndexPage() {
     }
 
     const fetchStocks = async () => {
-      setLoading(true);
+      // Only show loading state if we don't have any stocks data yet
+      if (stocks.length === 0) {
+        setLoading(true);
+      }
+      
       try {
-        // Use the new, market-aware endpoint
         const response = await fetch(`${API_URL}/api/markets/${currentMarket.id}/stocks`);
         if (!response.ok) throw new Error('Failed to fetch stocks for this market');
         const data = await response.json();
@@ -47,7 +49,7 @@ export default function GraphIndexPage() {
     };
 
     fetchStocks();
-  }, [currentMarket]); // Re-fetch whenever the market changes
+  }, [currentMarket, stocks.length]);
 
   if (loading) {
       return (

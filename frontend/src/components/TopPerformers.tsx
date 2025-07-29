@@ -12,13 +12,20 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
 const TopPerformers = () => {
   const router = useRouter();
-  const [performers, setPerformers] = useState({ top_performers: [], bottom_performers: [] });
+  const [performers, setPerformers] = useState({ 
+    top_performers: [], 
+    bottom_performers: [] 
+  });
   const [timeframe, setTimeframe] = useState('month');
   const [loading, setLoading] = useState(true);
   
   useEffect(() => {
     const fetchPerformers = async () => {
-      setLoading(true);
+      // Only show loading state on initial load when we have no data
+      if (performers.top_performers.length === 0 && performers.bottom_performers.length === 0) {
+        setLoading(true);
+      }
+      
       try {
         const response = await fetch(`${API_URL}/api/top-performers?period=${timeframe}`);
         const data = await response.json();
@@ -33,7 +40,7 @@ const TopPerformers = () => {
     fetchPerformers();
     const interval = setInterval(fetchPerformers, 60000); // Refresh every minute
     return () => clearInterval(interval);
-  }, [timeframe]);
+  }, [timeframe, performers.top_performers.length, performers.bottom_performers.length]);
 
   const PerformerRow = ({ stock, rank }) => (
     <div 

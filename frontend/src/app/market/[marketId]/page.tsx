@@ -59,7 +59,12 @@ export default function MarketManagementPage() {
 
     const fetchMarketDetails = useCallback(async () => {
         if (!marketId) return;
-        setLoading(true);
+        
+        // Only set loading to true if we don't already have market details
+        if (!marketDetails) {
+            setLoading(true);
+        }
+        
         try {
             const response = await fetch(`${API_URL}/api/markets/${marketId}/manage`);
             if (!response.ok) throw new Error('Failed to fetch market details');
@@ -70,7 +75,7 @@ export default function MarketManagementPage() {
         } finally {
             setLoading(false);
         }
-    }, [marketId, toast]);
+    }, [marketId, toast, marketDetails]);
 
     useEffect(() => {
         fetchMarketDetails();

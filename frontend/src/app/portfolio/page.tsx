@@ -33,14 +33,16 @@ export default function PortfolioPage() {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    // This function will only run if a user is logged in.
     if (!user) {
         setLoading(false);
         return;
     }
 
     const fetchData = async () => {
-      setLoading(true);
+      // Only show loading state on initial load when we have no data
+      if (holdings.length === 0 && transactions.length === 0) {
+        setLoading(true);
+      }
 
       console.log("--- STARTING PORTFOLIO DATA FETCH for user:", user.id); // Debug Log
 
@@ -100,7 +102,7 @@ export default function PortfolioPage() {
     }
 
     fetchData();
-  }, [user]); // The effect depends on the user object
+  }, [user, holdings.length, transactions.length]);
 
   // This handles the initial loading state
   if (loading) {

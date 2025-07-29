@@ -33,7 +33,11 @@ const StockGraph = ({ playerTag, champion }: StockGraphProps) => {
         return;
     };
 
-    setLoading(true);
+    // Only show loading on initial load
+    if (history.length === 0 && scores.length === 0) {
+      setLoading(true);
+    }
+    
     try {
         const encodedPlayerTag = encodeURIComponent(playerTag); // Ensure tag is URL-safe
 
@@ -65,7 +69,7 @@ const StockGraph = ({ playerTag, champion }: StockGraphProps) => {
     } finally {
         setLoading(false);
     }
-  }, [currentMarket, playerTag, champion, period]); // Correct dependency array
+  }, [currentMarket, playerTag, champion, period, history.length, scores.length]); // Correct dependency array
 
   useEffect(() => {
     fetchData();

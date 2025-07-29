@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { useMarket } from '@/app/context/MarketContext';
 import { TrendingUp, Activity, ArrowUpRight, ArrowDownRight, RefreshCw } from 'lucide-react';
@@ -34,10 +34,11 @@ const MarketOverview = () => {
     volatilityIndex: 0,
     lastRefreshed: null as string | null,
   });
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(true); // Stays true by default for initial load
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const pollIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
-  // --- VOLATILITY HELPER FUNCTIONS (NOW CORRECTLY INCLUDED) ---
+  // --- VOLATILITY HELPER FUNCTIONS ---
   const getVolatilityColor = (volatility: number): string => {
     if (volatility < 1.5) return 'text-green-500';
     if (volatility < 3.0) return 'text-yellow-500';
@@ -53,19 +54,34 @@ const MarketOverview = () => {
     return Math.sqrt(variance); // Return standard deviation as the volatility index
   };
   
-  // --- DATA FETCHING ---
+  // --- MODIFIED DATA FETCHING ---
   const fetchData = useCallback(async () => {
-    if (!currentMarket) {
+    if (!currentMarket?.id) {
         setLoading(false);
         setStocks([]);
         return;
     }
-    setLoading(true);
+
+    //
+    // v-- THE KEY CHANGE IS HERE --v
+    //
+    // Only set the main 'loading' state if there are no stocks to display.
+    // If we already have stocks, the page will NOT go into a loading state,
+    // and the old data will remain visible.
+    //
+    if (stocks.length === 0) {
+        setLoading(true);
+    }
+    //
+    // ^-- END OF KEY CHANGE --^
+    //
+
     try {
         const response = await fetch(`${API_URL}/api/markets/${currentMarket.id}/stocks`);
         if (!response.ok) throw new Error('Failed to fetch market data');
         const stocksData: Stock[] = await response.json();
         
+        // This is where React seamlessly updates the UI with the new data
         setStocks(stocksData);
         
         const totalValue = stocksData.reduce((sum, stock) => sum + stock.current_price, 0);
@@ -84,15 +100,16 @@ const MarketOverview = () => {
         console.error('Error fetching market overview data:', error);
         setStocks([]);
     } finally {
+        // Always set loading to false after a fetch attempt
         setLoading(false);
     }
-  }, [currentMarket]);
+  }, [currentMarket?.id, stocks.length]); // <-- Add stocks.length as a dependency
 
   useEffect(() => {
-    if (currentMarket) {
+    if (currentMarket?.id) { // <-- Check for the id
         fetchData();
     }
-  }, [fetchData, currentMarket]); 
+  }, [currentMarket?.id, fetchData]); // <-- CRITICAL CHANGE: Depend on the ID, not the object
   
   const handleRefresh = async () => {
     if (!currentMarket) return;
@@ -119,6 +136,7 @@ const MarketOverview = () => {
     }
   };
 
+  // This initial loading check is now perfect. It only runs once.
   if (loading) {
     return <div className="space-y-6"><Skeleton className="h-28 w-full" /><Skeleton className="h-96 w-full" /></div>
   }
@@ -136,7 +154,7 @@ const MarketOverview = () => {
 
   return (
     <div className="space-y-6">
-      {/* --- NEW: Page Header with Refresh Button --- */}
+      {/* --- Page Header with Refresh Button --- */}
       <div className="flex justify-between items-center">
         <div>
           <h1 className="text-2xl font-bold">Market Overview: {currentMarket.name}</h1>
@@ -215,7 +233,6 @@ const MarketOverview = () => {
                 {stocks.map((stock) => (
                   <tr 
                     key={`${stock.player_tag}-${stock.champion}`}
-                    // TODO: Update this route to be market-aware
                     onClick={() => router.push(`/graph/${encodeURIComponent(stock.player_tag)}`)}
                     className="cursor-pointer hover:bg-muted/50 border-b"
                   >
