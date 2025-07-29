@@ -100,24 +100,20 @@ async def refresh_market(market_id: int):
     finally:
         if conn: conn.close()
     
+    # --- Dispatch job to QStash ---
     destination_url = f"{APP_BASE_URL}/api/tasks/update-market"
     headers = {
         "Authorization": f"Bearer {QSTASH_TOKEN}",
         "Content-Type": "application/json"
     }
     payload = {
-        "destination": destination_url,  # ✅ required for v2
-        "body": {
-            "market_id": market_id
-        }
+        "destination": destination_url,
+        "body": json.dumps({"market_id": market_id})
     }
 
     try:
-        # CORRECTED: Combine the base URL from .env with the specific endpoint path
         publish_url = QSTASH_URL
-        
-        print(f"Dispatching task to QStash publish URL: {publish_url}") # Added for debugging
-        
+        print(f"Dispatching task to QStash publish URL: {publish_url}")
         response = requests.post(publish_url, headers=headers, json=payload)
         response.raise_for_status()
     except requests.exceptions.RequestException as e:
@@ -125,6 +121,7 @@ async def refresh_market(market_id: int):
         if e.response is not None:
             print(f"!!! QStash Response Body: {e.response.text}")
         raise HTTPException(status_code=500, detail="Failed to schedule background task.")
+
     
     print(f"Successfully dispatched update task for market {market_id} to QStash.")
     return {"status": "success", "message": "Refresh initiated."}
