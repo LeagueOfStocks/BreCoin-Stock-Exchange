@@ -225,16 +225,23 @@ class PlayerStockTracker:
             conn.close()
 
 
-    def calculate_new_stock(self, current_stock, model_score, market_config, alpha=0.4): # Add market_config
-        # Incorporate multipliers from market config
-        # This is a simple example; you can make the logic more complex
-        multiplier = market_config.get('config_multipliers', {}).get('default', 1.0)
+    def calculate_new_stock(self, current_stock, model_score, market_config, alpha=0.4):
+        # This is a safer way to handle a potentially None market_config
+        config = market_config or {}
+        
+        # Now, use the safe 'config' variable
+        multipliers = config.get('config_multipliers', {})
+        # Ensure multipliers itself is a dictionary if it's None
+        if multipliers is None:
+            multipliers = {}
+            
+        multiplier = multipliers.get('default', 1.0)
         adjusted_score = model_score * multiplier
         
         adjustment = (adjusted_score - 5) * 2
         raw_new_stock = current_stock + adjustment
         new_stock = alpha * raw_new_stock + (1 - alpha) * current_stock
-        return max(0.1, new_stock) # Set a floor price
+        return max(0.1, new_stock)
 
 
     # --- RUN METHOD FULLY RESTORED ---
