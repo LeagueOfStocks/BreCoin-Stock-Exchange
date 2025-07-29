@@ -102,6 +102,8 @@ async def refresh_market(market_id: int):
     
     # --- Dispatch job to QStash ---
     destination_url = f"{APP_BASE_URL}/api/tasks/update-market"
+    print(f"Dispatching to QStash with destination: '{destination_url}'")  # <--- ADD THIS LINE
+
     headers = {
         "Authorization": f"Bearer {QSTASH_TOKEN}",
         "Content-Type": "application/json"
@@ -121,7 +123,6 @@ async def refresh_market(market_id: int):
         if e.response is not None:
             print(f"!!! QStash Response Body: {e.response.text}")
         raise HTTPException(status_code=500, detail="Failed to schedule background task.")
-    print(f"Destination URL being sent to QStash: '{destination_url}'")
     
 
     print(f"Successfully dispatched update task for market {market_id} to QStash.")
