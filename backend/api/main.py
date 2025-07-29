@@ -74,11 +74,93 @@ async def health_check():
 
 # --- QStash Task Endpoint (Internal) ---
 @app.post("/api/tasks/update-market", status_code=status.HTTP_202_ACCEPTED, include_in_schema=False)
-async def task_update_market(payload: dict, _=Depends(verify_qstash_signature)):
-    market_id = payload.get("market_id")
-    if not market_id: raise HTTPException(status_code=400, detail="market_id missing")
-    await tracker.update_market_stocks(market_id)
-    return {"status": "success"}
+async def task_update_market(request: Request):
+    print(f"=== QStash webhook received at {datetime.now()} ===")
+    print(f"Request method: {request.method}")
+    print(f"Request URL: {request.url}")
+    print(f"Request headers: {dict(request.headers)}")
+    
+    # Get the signature from headers
+    signature = request.headers.get("Upstash-Signature")
+    print(f"Upstash-Signature header: {signature}")
+    
+    # Get the raw body
+    body = await request.body()
+    print(f"Raw body: {body}")
+    print(f"Body type: {type(body)}")
+    print(f"Body length: {len(body)}")
+    
+    # Check environment variables
+    print(f"QSTASH_CURRENT_SIGNING_KEY: {QSTASH_CURRENT_SIGNING_KEY}")
+    print(f"QSTASH_NEXT_SIGNING_KEY: {QSTASH_NEXT_SIGNING_KEY}")
+    
+    if not signature:
+        print("ERROR: No Upstash-Signature header found")
+        return {"error": "No signature header", "status": "failed"}
+    
+    if not QSTASH_CURRENT_SIGNING_KEY or not QSTASH_NEXT_SIGNING_KEY:
+        print("ERROR: Missing signing keys in environment")
+        return {"error": "Missing signing keys", "status": "failed"}
+    
+    # Manual signature verification with detailed logging
+    try:
+        # Try current key
+        print("=== Trying CURRENT signing key ===")
+        h_current = hmac.new(QSTASH_CURRENT_SIGNING_KEY.encode(), body, hashlib.sha256)
+        current_digest = h_current.digest()
+        current_signature = base64.b64encode(current_digest).decode()
+        print(f"Computed current signature: {current_signature}")
+        print(f"Received signature:        {signature}")
+        print(f"Current signatures match: {hmac.compare_digest(current_signature, signature)}")
+        
+        if hmac.compare_digest(current_signature, signature):
+            print("SUCCESS: Current signature verification passed!")
+        else:
+            # Try next key
+            print("=== Trying NEXT signing key ===")
+            h_next = hmac.new(QSTASH_NEXT_SIGNING_KEY.encode(), body, hashlib.sha256)
+            next_digest = h_next.digest()
+            next_signature = base64.b64encode(next_digest).decode()
+            print(f"Computed next signature: {next_signature}")
+            print(f"Next signatures match: {hmac.compare_digest(next_signature, signature)}")
+            
+            if hmac.compare_digest(next_signature, signature):
+                print("SUCCESS: Next signature verification passed!")
+            else:
+                print("ERROR: Neither signature matched - verification failed")
+                return {"error": "Invalid signature", "status": "failed"}
+        
+        # If we get here, signature verification passed
+        print("=== Signature verification successful, processing request ===")
+        
+        # Parse the JSON body
+        try:
+            import json
+            payload = json.loads(body.decode('utf-8'))
+            print(f"Parsed payload: {payload}")
+        except Exception as e:
+            print(f"ERROR parsing JSON payload: {e}")
+            return {"error": "Invalid JSON payload", "status": "failed"}
+        
+        market_id = payload.get("market_id")
+        if not market_id:
+            print("ERROR: market_id missing from payload")
+            return {"error": "market_id missing", "status": "failed"}
+        
+        print(f"Starting stock update for market {market_id}")
+        
+        # Actually run the stock update
+        await tracker.update_market_stocks(market_id)
+        
+        print(f"Completed stock update for market {market_id}")
+        return {"status": "success", "message": f"Updated market {market_id}"}
+        
+    except Exception as e:
+        print(f"ERROR in task_update_market: {e}")
+        import traceback
+        traceback.print_exc()
+        return {"error": str(e), "status": "failed"}
+
 
 # --- User-Facing API Endpoints ---
 @app.post("/api/markets/{market_id}/refresh")
