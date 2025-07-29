@@ -1,22 +1,15 @@
-import requests
-import pandas as pd
-from datetime import datetime
-import pickle  # Switched to pickle to match our model saving format
-import time
-import sys
-import os
-import numpy as np
 import asyncio
 import aiohttp
 import aiofiles
+import pandas as pd
+from datetime import datetime
+import pickle
+import sys
+import os
+import numpy as np
+from lib.database import get_connection, get_dict_connection
 
-
-# Add current directory to Python path if necessary
 sys.path.append('.')
-
-# --- NEW: Define the exact feature order your new models were trained on. ---
-# This is CRITICAL for ensuring the data is fed to the model correctly.
-# This list must be identical to the one used in your final training script.
 
 FEATURE_ORDER = [
     'kda', 'dmg_to_champions_per_min', 'team_damage_share', 'team_gold_share',
@@ -33,121 +26,61 @@ class PlayerStockTracker:
     def __init__(self, api_key):
         self.api_key = api_key
         self.headers = {"X-Riot-Token": self.api_key}
-        self.base_url = "https://na1.api.riotgames.com"
-
- 
-        # --- MODIFIED: Load 5 specialist models instead of one. ---
+        self.base_url = "https://americas.api.riotgames.com" # Corrected base URL
         self.models = {}
-
-        # --- NEW: Mapping from Riot's API role names to our model keys ---
-        self.role_name_mapping = {
-            "TOP": "Top",
-            "JUNGLE": "Jungle",
-            "MIDDLE": "Mid",
-            "BOTTOM": "ADC",
-            "UTILITY": "Support"
-        }
-        
-        # Valid game types (unchanged)
+        self.role_name_mapping = {"TOP": "Top", "JUNGLE": "Jungle", "MIDDLE": "Mid", "BOTTOM": "ADC", "UTILITY": "Support"}
         self.valid_game_types = ["RANKED_SOLO_5x5", "RANKED_FLEX_SR", "CLASH", "NORMAL_DRAFT_5x5"]
 
-    # --- NEW: Function to load all 5 model files at startup ---
     async def load_models_async(self):
-        """Asynchronously loads the 5 specialist model .pkl files into memory."""
-        if self.models: # Don't load if already loaded
-            return
-        print("--- Asynchronously loading all specialist models ---")
+        if self.models: return
+        print("--- Asynchronously loading specialist models ---")
         try:
             for role in ['Top', 'Jungle', 'Mid', 'ADC', 'Support']:
                 model_filename = f'{role.lower()}_model.pkl'
                 async with aiofiles.open(model_filename, 'rb') as f:
                     content = await f.read()
                     self.models[role] = pickle.loads(content)
-            print("All 5 models have been loaded successfully.")
+            print("All models loaded successfully.")
         except FileNotFoundError as e:
             print(f"!!! CRITICAL ERROR: Could not load models. Missing file: {e.filename} !!!")
-            self.models = {}
 
-
-    def init_database(self):
-        # Check if tables exist and create them if they don't
-        from lib.database import get_connection
-        conn = get_connection()
-        
+    # --- Database Methods (Corrected) ---
+    def get_market_config_and_players(self, market_id: int):
+        conn = get_dict_connection()
         try:
             with conn.cursor() as c:
-                # Check if stock_values table exists
+                c.execute("SELECT tier, config_multipliers FROM markets WHERE id = %s", (market_id,))
+                market_config = c.fetchone()
+                if not market_config: return None, None
+
                 c.execute("""
-                    SELECT EXISTS (
-                        SELECT FROM information_schema.tables 
-                        WHERE table_name = 'stock_values'
-                    )
-                """)
-                table_exists = c.fetchone()[0]
-                
-                if not table_exists:
-                    # Create stock values table
-                    c.execute('''
-                        CREATE TABLE stock_values (
-                            player_tag TEXT,
-                            champion TEXT,
-                            stock_value REAL,
-                            model_score REAL,
-                            timestamp TIMESTAMP,
-                            game_id TEXT,
-                            PRIMARY KEY (player_tag, champion, timestamp)
-                        )
-                    ''')
-                
-                # Check if processed_games table exists
-                c.execute("""
-                    SELECT EXISTS (
-                        SELECT FROM information_schema.tables 
-                        WHERE table_name = 'processed_games'
-                    )
-                """)
-                table_exists = c.fetchone()[0]
-                
-                if not table_exists:
-                    # Create processed games table
-                    c.execute('''
-                        CREATE TABLE processed_games (
-                            game_id TEXT,
-                            player_tag TEXT,
-                            champion TEXT,
-                            processed_date TIMESTAMP,
-                            PRIMARY KEY (game_id, player_tag, champion)
-                        )
-                    ''')
-                
-                conn.commit()
+                    SELECT mp.id, mp.player_tag, array_agg(pc.champion_name) as champions
+                    FROM market_players mp
+                    JOIN player_champions pc ON mp.id = pc.market_player_id
+                    WHERE mp.market_id = %s
+                    GROUP BY mp.id, mp.player_tag
+                """, (market_id,))
+                players = c.fetchall()
+                player_map = {p['player_tag']: {'id': p['id'], 'champions': p['champions']} for p in players}
+                return market_config, player_map
         finally:
             conn.close()
 
-    def is_game_processed(self, market_id, game_id, player_tag, champion): # Add market_id
-            from lib.database import get_connection
-            conn = get_connection()
-            try:
-                with conn.cursor() as c:
-                    c.execute('''
-                        SELECT 1 FROM processed_games 
-                        WHERE market_id = %s AND game_id = %s AND player_tag = %s AND champion = %s
-                    ''', (market_id, game_id, player_tag, champion)) # Add market_id
-                    result = c.fetchone()
-                    return result is not None
-            finally:
-                conn.close()
-
-
-    def mark_game_processed(self, market_player_id, game_id, player_tag, champion):
-        from lib.database import get_connection
+    def is_game_processed(self, market_player_id, game_id):
         conn = get_connection()
         try:
             with conn.cursor() as c:
-                c.execute("""
-                    INSERT INTO processed_games (market_player_id, game_id, player_tag, champion)
-                    VALUES (%s, %s, %s, %s)
-                """, (market_player_id, game_id, player_tag, champion))
+                c.execute("SELECT 1 FROM processed_games WHERE market_player_id = %s AND game_id = %s", (market_player_id, game_id))
+                return c.fetchone() is not None
+        finally:
+            conn.close()
+
+    def mark_game_processed(self, market_player_id, game_id, player_tag, champion):
+        conn = get_connection()
+        try:
+            with conn.cursor() as c:
+                c.execute("INSERT INTO processed_games (market_player_id, game_id, player_tag, champion) VALUES (%s, %s, %s, %s)",
+                          (market_player_id, game_id, player_tag, champion))
                 conn.commit()
         finally:
             conn.close()
@@ -268,37 +201,28 @@ class PlayerStockTracker:
         }
         return metrics
 
-    def get_current_stock(self, market_id, player_tag, champion): # Add market_id
-        from lib.database import get_connection
+    def get_current_stock(self, market_player_id, player_tag, champion):
         conn = get_connection()
         try:
             with conn.cursor() as c:
-                c.execute('''
-                    SELECT stock_value FROM stock_values 
-                    WHERE market_id = %s AND player_tag = %s AND champion = %s
-                    ORDER BY timestamp DESC LIMIT 1
-                ''', (market_id, player_tag, champion)) # Add market_id
+                c.execute("SELECT stock_value FROM stock_values WHERE market_player_id = %s AND player_tag = %s AND champion = %s ORDER BY timestamp DESC LIMIT 1",
+                          (market_player_id, player_tag, champion))
                 result = c.fetchone()
                 return result[0] if result else 10.0
         finally:
             conn.close()
 
-
-    def update_stock(self, market_player_id, player_tag, champion, new_value, model_score, game_id):
-            from lib.database import get_connection
-            conn = get_connection()
-            try:
-                # ... (your numpy conversion logic) ...
-                with conn.cursor() as c:
-                    c.execute("""
-                        INSERT INTO stock_values (market_player_id, player_tag, champion, stock_value, model_score, game_id)
-                        VALUES (%s, %s, %s, %s, %s, %s)
-                    """, (market_player_id, player_tag, champion, new_value, model_score, game_id))
-                    conn.commit()
-            finally:
-                conn.close()
-
-
+    def update_stock(self, market_id, market_player_id, player_tag, champion, new_value, model_score, game_id):
+        conn = get_connection()
+        try:
+            new_value_f = float(new_value.item() if hasattr(new_value, 'item') else new_value)
+            model_score_f = float(model_score.item() if hasattr(model_score, 'item') else model_score)
+            with conn.cursor() as c:
+                c.execute("INSERT INTO stock_values (market_id, market_player_id, player_tag, champion, stock_value, model_score, game_id) VALUES (%s, %s, %s, %s, %s, %s, %s)",
+                          (market_id, market_player_id, player_tag, champion, new_value_f, model_score_f, game_id))
+                conn.commit()
+        finally:
+            conn.close()
 
 
     def calculate_new_stock(self, current_stock, model_score, market_config, alpha=0.4): # Add market_config
@@ -337,57 +261,58 @@ class PlayerStockTracker:
         finally:
             conn.close()
 
-    async def process_player(self, session, market_id, market_config, player_tag, allowed_champions):
-        """The core async logic for updating a single player within a market."""
-        try:
-            print(f"Processing {player_tag} for market {market_id}...")
-            puuid = await self.get_puuid(session, player_tag)
-            if not puuid: return
+    async def process_player(self, session, market_id, market_config, player_tag, player_data):
+            try:
+                market_player_id = player_data['id']
+                allowed_champions = player_data['champions']
+                print(f"Processing {player_tag} (ID: {market_player_id}) for market {market_id}. Allowed champs: {allowed_champions}")
 
-            match_ids = await self.get_match_ids(session, puuid)
-            
-            for match_id in match_ids:
-                match_data, timeline_data = await self.get_match_data(session, match_id)
-                participant_data = next((p for p in match_data['info']['participants'] if p['puuid'] == puuid), None)
-                
-                if not participant_data: continue
-                champion_played = participant_data['championName']
-                
-                if champion_played not in allowed_champions:
-                    continue
-                
-                if self.is_game_processed(market_id, match_id, player_tag, champion_played):
-                    # We have found the most recent game that's already been processed.
-                    # This means we don't need to look any further back in their history.
-                    return
+                puuid = await self.get_puuid(session, player_tag)
+                if not puuid: return
 
-                # If we are here, this is the newest, unprocessed game on an allowed champion.
-                print(f"Found new game {match_id} for {player_tag} on {champion_played}.")
+                match_ids = await self.get_match_ids(session, puuid)
                 
-                metrics = self.calculate_metrics(match_data, timeline_data, puuid)
-                if not metrics: continue
-                
-                role = metrics.pop('role')
-                if role not in self.models: continue
+                for match_id in match_ids:
+                    # First, check if this game has been processed for this player in this market
+                    if self.is_game_processed(market_player_id, match_id):
+                        print(f"Game {match_id} already processed for player {market_player_id}. Stopping search.")
+                        return # Found the latest processed game, no need to look further back
 
-                model_input_df = pd.DataFrame([metrics], columns=FEATURE_ORDER)
-                raw_model_score = self.models[role].predict(model_input_df)[0]
-                final_model_score = np.clip(raw_model_score, 0, 10)
-                
-                current_stock = self.get_current_stock(market_id, player_tag, champion_played)
-                new_stock = self.calculate_new_stock(current_stock, final_model_score, market_config)
-                
-                self.update_stock(market_id, player_tag, champion_played, new_stock, final_model_score, match_id)
-                self.mark_game_processed(market_id, match_id, player_tag, champion_played)
-                
-                print(f"Successfully processed and updated stock for {player_tag} from game {match_id}.")
-                return # We only process ONE game per player per refresh cycle.
+                    match_data, timeline_data = await self.get_match_data(session, match_id)
+                    participant_data = next((p for p in match_data['info']['participants'] if p['puuid'] == puuid), None)
+                    
+                    if not participant_data: continue
+                    champion_played = participant_data['championName']
+                    
+                    if champion_played in allowed_champions:
+                        print(f"Found new, unprocessed game {match_id} on an allowed champion: {champion_played}.")
+                        
+                        # --- CORE LOGIC ---
+                        metrics = self.calculate_metrics(match_data, timeline_data, puuid)
+                        if not metrics: continue
+                        
+                        role = metrics.pop('role')
+                        if role not in self.models: continue
 
-        except Exception as e:
-            print(f"!!! FAILED to process {player_tag} for market {market_id}: {e}")
+                        model_input_df = pd.DataFrame([metrics], columns=FEATURE_ORDER)
+                        raw_model_score = self.models[role].predict(model_input_df)[0]
+                        final_model_score = np.clip(raw_model_score, 0, 10)
+                        
+                        current_stock = self.get_current_stock(market_player_id, player_tag, champion_played)
+                        new_stock = self.calculate_new_stock(current_stock, final_model_score, market_config)
+                        
+                        self.update_stock(market_id, market_player_id, player_tag, champion_played, new_stock, final_model_score, match_id)
+                        self.mark_game_processed(market_player_id, match_id, player_tag, champion_played)
+                        
+                        print(f"SUCCESS: Processed and updated stock for {player_tag} from game {match_id}.")
+                        return # Process only the single most recent game
+                
+                print(f"No new, unprocessed games found for {player_tag} on allowed champions.")
+
+            except Exception as e:
+                print(f"!!! FAILED to process {player_tag} for market {market_id}: {e}")
 
     async def update_market_stocks(self, market_id: int):
-        """The main entry point for a background worker to call."""
         print(f"--- Starting background stock update for market {market_id} ---")
         await self.load_models_async()
         
@@ -397,10 +322,8 @@ class PlayerStockTracker:
             return
 
         async with aiohttp.ClientSession() as session:
-            tasks = [
-                self.process_player(session, market_id, market_config, player_tag, data['champions'])
-                for player_tag, data in players_to_update.items()
-            ]
+            # Correctly pass the entire player data object
+            tasks = [self.process_player(session, market_id, market_config, player_tag, data) for player_tag, data in players_to_update.items()]
             await asyncio.gather(*tasks)
         
         print(f"--- Finished background update for market {market_id} ---")
