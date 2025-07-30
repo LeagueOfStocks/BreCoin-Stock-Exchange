@@ -4,7 +4,7 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { useAuth } from '@/app/context/AuthContext' 
 import { Button } from '@/components/ui/button'
-import MarketSelector from './MarketSelector' 
+import MarketSelector from '@/components/features/market/MarketSelector'
 import { Skeleton } from '@/components/ui/skeleton'
 
 const Navigation = () => {
@@ -28,38 +28,42 @@ const Navigation = () => {
               <div className="flex items-center gap-2">
                 <Link href="/" className={getLinkClassName('/')}>
                   Market Overview
-                  <span className="absolute bottom-0 left-0 w-0 h-0.5 bg-blue-500 group-hover:w-full transition-all duration-300"/>
                 </Link>
                 <Link href="/trade" className={getLinkClassName('/trade')}>
                   Trade
-                  <span className="absolute bottom-0 left-0 w-0 h-0.5 bg-blue-500 group-hover:w-full transition-all duration-300"/>
                 </Link>
                 <Link href="/portfolio" className={getLinkClassName('/portfolio')}>
                   Portfolio
-                  <span className="absolute bottom-0 left-0 w-0 h-0.5 bg-blue-500 group-hover:w-full transition-all duration-300"/>
                 </Link>
                 <Link href="/graph" className={getLinkClassName('/graph', true)}>
-                  Graphs
-                  <span className="absolute bottom-0 left-0 w-0 h-0.5 bg-blue-500 group-hover:w-full transition-all duration-300"/>
+                  Charts
                 </Link>
                 <Link href="/top" className={getLinkClassName('/top')}>
-                  Top Performers
-                  <span className="absolute bottom-0 left-0 w-0 h-0.5 bg-blue-500 group-hover:w-full transition-all duration-300"/>
+                  Top Stocks
                 </Link>
               </div>
             )}
           </div>
-          <div className="flex items-center gap-4">
+          
+          <div className="flex items-center space-x-4">
+            {/* Show loading skeleton during auth initialization */}
             {isLoading ? (
-              <Skeleton className="h-9 w-20" />
+              <Skeleton className="w-48 h-10" />
             ) : user ? (
               <>
                 <MarketSelector />
-                <Button variant="outline" onClick={signOut}>Logout</Button>
+                <span className="text-sm text-gray-600">
+                  {user.email}
+                </span>
+                <Button 
+                  onClick={signOut}
+                  variant="outline"
+                  size="sm"
+                >
+                  Sign Out
+                </Button>
               </>
-            ) : (
-              pathname !== '/login' && <Link href="/login"><Button>Login</Button></Link>
-            )}
+            ) : null}
           </div>
         </div>
       </div>
@@ -67,4 +71,4 @@ const Navigation = () => {
   )
 }
 
-export default Navigation
+export default Navigation 

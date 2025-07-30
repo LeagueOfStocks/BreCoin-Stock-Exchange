@@ -1,6 +1,6 @@
 'use client'
 
-import StockGraph from "@/components/StockGraph";
+import StockGraph from "@/components/features/stocks/StockGraph";
 import { useParams, useSearchParams } from "next/navigation";
 
 export default function StockDetailPage() {

@@ -18,13 +18,26 @@ interface StockGraphProps {
 interface StockDataPoint { stock_value: number; timestamp: string; }
 interface ModelScore { model_score: number; timestamp: string; stock_value: number; previous_stock_value: number | null; price_change: number; formatted_time: string; }
 
+// Global singleton variables to prevent re-initialization during navigation
+let hasStockGraphRenderedBefore = false;
+let cachedStockHistory: StockDataPoint[] = [];
+let cachedStockScores: ModelScore[] = [];
+let cachedPlayerTag = '';
+let cachedChampion = '';
+
 const StockGraph = ({ playerTag, champion }: StockGraphProps) => {
   const { currentMarket, initialized: marketInitialized } = useMarket();
   const [period, setPeriod] = useState('1w');
-  const [history, setHistory] = useState<StockDataPoint[]>([]);
-  const [scores, setScores] = useState<ModelScore[]>([]);
-  const [loading, setLoading] = useState(false); // Start with false
-  const [initialized, setInitialized] = useState(false); // Track initialization
+  const [history, setHistory] = useState<StockDataPoint[]>(
+    (cachedPlayerTag === playerTag && cachedChampion === champion) ? cachedStockHistory : []
+  );
+  const [scores, setScores] = useState<ModelScore[]>(
+    (cachedPlayerTag === playerTag && cachedChampion === champion) ? cachedStockScores : []
+  );
+  const [loading, setLoading] = useState(false);
+  const [initialized, setInitialized] = useState(
+    hasStockGraphRenderedBefore && cachedPlayerTag === playerTag && cachedChampion === champion
+  );
 
   // Using useCallback to memoize the fetch function
   const fetchData = useCallback(async () => {
@@ -35,18 +48,19 @@ const StockGraph = ({ playerTag, champion }: StockGraphProps) => {
     if (!currentMarket || !playerTag || !champion) {
         setLoading(false);
         setInitialized(true);
+        hasStockGraphRenderedBefore = true;
         return;
     };
 
     // Only show loading skeleton on first load when we have no data and haven't initialized
-    if (!initialized && history.length === 0 && scores.length === 0) {
+    if (!initialized && !hasStockGraphRenderedBefore) {
       setLoading(true);
     }
     
     try {
         const encodedPlayerTag = encodeURIComponent(playerTag); // Ensure tag is URL-safe
 
-        // --- THIS IS THE CORRECTED URL CONSTRUCTION ---
+        // --- CORRECT API ENDPOINTS ---
         const historyUrl = `${API_URL}/api/markets/${currentMarket.id}/stocks/${encodedPlayerTag}/${champion}/history?period=${period}`;
         const scoresUrl = `${API_URL}/api/markets/${currentMarket.id}/stocks/${encodedPlayerTag}/${champion}/scores`;
         
@@ -67,22 +81,31 @@ const StockGraph = ({ playerTag, champion }: StockGraphProps) => {
         setHistory(historyData || []); // Ensure we always have an array
         setScores(scoresData || []);   // Ensure we always have an array
 
+        // Cache the data
+        cachedStockHistory = historyData || [];
+        cachedStockScores = scoresData || [];
+        cachedPlayerTag = playerTag;
+        cachedChampion = champion;
+
     } catch (error) {
         console.error("Error fetching stock details:", error);
-        setHistory([]); // Reset to empty on error
-        setScores([]);  // Reset to empty on error
+        if (!hasStockGraphRenderedBefore) {
+          setHistory([]); // Reset to empty on error
+          setScores([]);  // Reset to empty on error
+        }
     } finally {
         setLoading(false);
         setInitialized(true);
+        hasStockGraphRenderedBefore = true;
     }
-  }, [currentMarket, playerTag, champion, period, marketInitialized, initialized, history.length, scores.length]); // Correct dependency array
+  }, [currentMarket, playerTag, champion, period, marketInitialized, initialized]);
 
   useEffect(() => {
     fetchData();
   }, [fetchData]);
 
   // Only show loading skeleton on initial load when market context is not ready
-  if (!marketInitialized || (loading && !initialized)) {
+  if (!marketInitialized || (loading && !initialized && !hasStockGraphRenderedBefore)) {
     return <div className="space-y-4 p-8"><Skeleton className="h-48 w-full" /><Skeleton className="h-96 w-full" /></div>
   }
 
@@ -185,4 +208,4 @@ const StockGraph = ({ playerTag, champion }: StockGraphProps) => {
   );
 };
 
-export default StockGraph;
+export default StockGraph; 

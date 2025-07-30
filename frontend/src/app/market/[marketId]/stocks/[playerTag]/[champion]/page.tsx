@@ -1,4 +1,4 @@
-import StockGraph from "@/components/StockGraph"; // <-- Import the component
+import StockGraph from "@/components/features/stocks/StockGraph"; // <-- Import the component
 
 interface PageProps {
     params: {
@@ -17,7 +17,6 @@ export default function StockDetailPage({ params }: PageProps) {
     return (
         <div>
             <StockGraph 
-                marketId={marketId}
                 playerTag={decodedPlayerTag}
                 champion={champion}
             />

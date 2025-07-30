@@ -28,21 +28,19 @@ export default function MarketSelector() {
 
     // Loading is finished, and there IS a current market.
     return (
-        <div className="flex items-center gap-2">
+        <div className="flex items-center space-x-2">
             <Select
                 value={currentMarket.id.toString()}
                 onValueChange={(marketId) => {
-                    const selected = userMarkets.find(m => m.id.toString() === marketId)
-                    if (selected) {
-                        selectMarket(selected)
-                    }
+                    const market = userMarkets.find(m => m.id.toString() === marketId)
+                    if (market) selectMarket(market)
                 }}
             >
                 <SelectTrigger className="w-48">
-                    <SelectValue placeholder="Select a market..." />
+                    <SelectValue placeholder="Select a market" />
                 </SelectTrigger>
                 <SelectContent>
-                    {userMarkets.map(market => (
+                    {userMarkets.map((market) => (
                         <SelectItem key={market.id} value={market.id.toString()}>
                             {market.name}
                         </SelectItem>
@@ -50,11 +48,12 @@ export default function MarketSelector() {
                 </SelectContent>
             </Select>
             
-            <Link href={`/market/${currentMarket.id}`} passHref>
-                <Button variant="ghost" size="icon" aria-label="Market Settings">
+            {/* Settings/Management button that appears only for the current market */}
+            <Link href={`/market/${currentMarket.id}`}>
+                <Button variant="outline" size="icon">
                     <Settings className="h-4 w-4" />
                 </Button>
             </Link>
         </div>
     )
-}
+} 

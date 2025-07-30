@@ -1,6 +1,6 @@
 import type { Metadata } from 'next'
 import { Inter } from 'next/font/google'
-import Navigation from '@/components/Navigation'
+import Navigation from '@/components/layout/Navigation'
 import { AuthProvider } from './context/AuthContext'
 import { MarketProvider } from './context/MarketContext'
 import { NavigationProvider } from './context/NavigationContext'

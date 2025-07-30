@@ -67,7 +67,7 @@ export const MarketProvider = ({ children }: { children: React.ReactNode }) => {
       setLoading(false);
       setInitialized(true);
     }
-  }, [user, initialized]); // Keep minimal dependencies
+  }, [user]); // Remove 'initialized' to prevent dependency chain
 
   // This useEffect hook is the entry point. It runs when the user changes.
   useEffect(() => {
