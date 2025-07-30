@@ -198,6 +198,16 @@ class PlayerStockTracker:
             'healing_shielding_allies_per_min': (participant.get('totalHealOnTeammates', 0) + participant.get('totalDamageShieldedOnTeammates', 0)) / game_duration_min,
             'win_loss': 1 if participant.get('win', False) else 0
         }
+        
+        # Print all calculated metrics for debugging
+        print(f"=== CALCULATED METRICS for {participant.get('championName', 'Unknown')} ===")
+        for metric_name, metric_value in metrics.items():
+            if isinstance(metric_value, float):
+                print(f"{metric_name}: {metric_value:.2f}")
+            else:
+                print(f"{metric_name}: {metric_value}")
+        print("=" * 50)
+        
         return metrics
 
     def get_current_stock(self, market_player_id, player_tag, champion):
@@ -240,7 +250,21 @@ class PlayerStockTracker:
         adjustment = (adjusted_score - 5) * 2
         raw_new_stock = current_stock + adjustment
         new_stock = alpha * raw_new_stock + (1 - alpha) * current_stock
-        return max(0.1, new_stock)
+        final_stock = max(0.1, new_stock)
+        
+        # Print stock calculation breakdown
+        print(f"--- STOCK CALCULATION BREAKDOWN ---")
+        print(f"Current Stock: {current_stock:.2f}")
+        print(f"Model Score: {model_score:.2f}")
+        print(f"Market Multiplier: {multiplier:.2f}")
+        print(f"Adjusted Score: {adjusted_score:.2f}")
+        print(f"Adjustment: (({adjusted_score:.2f} - 5) * 2) = {adjustment:.2f}")
+        print(f"Raw New Stock: {current_stock:.2f} + {adjustment:.2f} = {raw_new_stock:.2f}")
+        print(f"Alpha Blending: {alpha:.1f} * {raw_new_stock:.2f} + {1-alpha:.1f} * {current_stock:.2f} = {new_stock:.2f}")
+        print(f"Final Stock (min 0.1): {final_stock:.2f}")
+        print("--- END BREAKDOWN ---")
+        
+        return final_stock
 
 
     # --- RUN METHOD FULLY RESTORED ---
@@ -306,6 +330,16 @@ class PlayerStockTracker:
                         
                         current_stock = self.get_current_stock(market_player_id, player_tag, champion_played)
                         new_stock = self.calculate_new_stock(current_stock, final_model_score, market_config)
+                        
+                        # Print model and stock calculation results
+                        print(f"=== MODEL & STOCK CALCULATION for {player_tag} on {champion_played} ===")
+                        print(f"Role: {role}")
+                        print(f"Raw Model Score: {raw_model_score:.4f}")
+                        print(f"Final Model Score (clipped): {final_model_score:.2f}")
+                        print(f"Current Stock Price: {current_stock:.2f}")
+                        print(f"New Stock Price: {new_stock:.2f}")
+                        print(f"Stock Change: {new_stock - current_stock:+.2f}")
+                        print("=" * 60)
                         
                         self.update_stock(market_id, market_player_id, player_tag, champion_played, new_stock, final_model_score, match_id)
                         self.mark_game_processed(market_player_id, match_id, player_tag, champion_played)
