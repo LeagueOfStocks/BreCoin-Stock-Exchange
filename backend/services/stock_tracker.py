@@ -102,7 +102,7 @@ class PlayerStockTracker:
         data = await self._api_request(session, url)
         return data['puuid']
 
-    async def get_match_ids(self, session, puuid, count=20):
+    async def get_match_ids(self, session, puuid, count=5):
         """Gets a list of recent matches, not just the latest one."""
         url = f"https://americas.api.riotgames.com/lol/match/v5/matches/by-puuid/{puuid}/ids?count={count}"
         return await self._api_request(session, url)

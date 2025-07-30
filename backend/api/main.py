@@ -250,14 +250,39 @@ class PlayerAdd(BaseModel):
 class ChampionAdd(BaseModel):
     champion_name: str
 
+class MarketDelete(BaseModel):
+    user_id: str
+
+class KickUser(BaseModel):
+    user_to_kick_id: str # The ID of the user being kicked
+    creator_id: str      # The ID of the user performing the kick action
+
+class MarketMember(BaseModel):
+    id: str # This is the user's UUID
+    username: str
 
 @app.post("/api/markets/create", status_code=status.HTTP_201_CREATED)
 async def create_market(market_data: MarketCreate):
     conn = get_dict_connection()
     try:
         with conn.cursor() as c:
-            # TODO: Add logic to check user's tier and market count limit from `profiles` table
-            
+         # --- NEW TIER VALIDATION LOGIC (SAME AS JOIN) ---
+            c.execute("""
+                SELECT 
+                    p.subscription_tier, 
+                    (SELECT COUNT(*) FROM market_members WHERE user_id = p.id) as market_count
+                FROM profiles p WHERE id = %s
+            """, (market_data.creator_id,))
+            user_profile = c.fetchone()
+            user_tier = user_profile['subscription_tier'] if user_profile else 'free'
+            market_count = user_profile['market_count'] if user_profile else 0
+
+            tier_limits = {'free': 1, 'premium': 1, 'pro': 3}
+            limit = tier_limits.get(user_tier, 1)
+
+            if market_count >= limit:
+                raise HTTPException(status_code=403, detail=f"Your '{user_tier}' plan only allows you to create/join {limit} market(s). Upgrade to Pro for more.")
+
             invite_code = _generate_invite_code()
             # Ensure code is unique
             c.execute("SELECT 1 FROM markets WHERE invite_code = %s", (invite_code,))
@@ -293,6 +318,26 @@ async def join_market(join_data: MarketJoin):
             if not market:
                 raise HTTPException(status_code=404, detail="Invalid invite code.")
             market_id = market['id']
+
+            # --- NEW TIER VALIDATION LOGIC ---
+            # 1. Get the user's current tier and market count
+            c.execute("""
+                SELECT 
+                    p.subscription_tier, 
+                    (SELECT COUNT(*) FROM market_members WHERE user_id = p.id) as market_count
+                FROM profiles p WHERE id = %s
+            """, (join_data.user_id,))
+            user_profile = c.fetchone()
+            user_tier = user_profile['subscription_tier'] if user_profile else 'free'
+            market_count = user_profile['market_count'] if user_profile else 0
+
+            # 2. Define the limits
+            tier_limits = {'free': 1, 'premium': 1, 'pro': 3}
+            limit = tier_limits.get(user_tier, 1)
+
+            # 3. Enforce the limit
+            if market_count >= limit:
+                raise HTTPException(status_code=403, detail=f"Your '{user_tier}' plan only allows you to join {limit} market(s). Upgrade to Pro to join more.")
             
             # Check if user is already a member
             c.execute("SELECT 1 FROM market_members WHERE market_id = %s AND user_id = %s", (market_id, join_data.user_id))
@@ -305,7 +350,6 @@ async def join_market(join_data: MarketJoin):
             if member_count >= market['player_limit']:
                 raise HTTPException(status_code=403, detail="This market is full.")
 
-            # TODO: Add logic to check user's tier and market join limit
 
             # Add user to the market
             c.execute("INSERT INTO market_members (market_id, user_id) VALUES (%s, %s)", (market_id, join_data.user_id))
@@ -383,6 +427,61 @@ async def add_player_to_market(market_id: int, player_data: PlayerAdd):
             conn.close()
 
 
+@app.get("/api/markets/{market_id}/members", response_model=list[MarketMember])
+async def get_market_members(market_id: int):
+    """Gets a list of all members (users) in a specific market."""
+    conn = get_dict_connection()
+    try:
+        with conn.cursor() as c:
+            # We join market_members with profiles to get the username
+            c.execute("""
+                SELECT p.id, p.username
+                FROM profiles p
+                JOIN market_members mm ON p.id = mm.user_id
+                WHERE mm.market_id = %s
+            """, (market_id,))
+            members = c.fetchall()
+            return members
+    finally:
+        if conn: conn.close()
+
+
+
+@app.delete("/api/markets/{market_id}/members", status_code=status.HTTP_204_NO_CONTENT)
+async def kick_user_from_market(market_id: int, kick_data: KickUser):
+    """
+    Removes a member from a market. This action can only be performed by the market's creator.
+    """
+    conn = get_dict_connection()
+    try:
+        with conn.cursor() as c:
+            # --- SECURITY CHECK: Verify the requester is the creator ---
+            c.execute("SELECT creator_id FROM markets WHERE id = %s", (market_id,))
+            market = c.fetchone()
+
+            if not market:
+                raise HTTPException(status_code=404, detail="Market not found.")
+
+            if market['creator_id'] != kick_data.creator_id:
+                raise HTTPException(status_code=403, detail="Only the market creator can remove members.")
+
+            # Prevent the creator from kicking themselves
+            if kick_data.creator_id == kick_data.user_to_kick_id:
+                raise HTTPException(status_code=400, detail="The creator cannot be kicked from their own market.")
+
+            # If checks pass, proceed with deletion
+            c.execute("DELETE FROM market_members WHERE market_id = %s AND user_id = %s", (market_id, kick_data.user_to_kick_id))
+            conn.commit()
+
+            print(f"Creator {kick_data.creator_id} successfully kicked user {kick_data.user_to_kick_id} from market {market_id}.")
+            return
+
+    except Exception as e:
+        if conn: conn.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        if conn: conn.close()
+
 
 @app.post("/api/markets/players/{player_id}/champions", status_code=status.HTTP_201_CREATED)
 async def add_champion_to_player(player_id: int, champion_data: ChampionAdd):
@@ -399,6 +498,67 @@ async def add_champion_to_player(player_id: int, champion_data: ChampionAdd):
     finally:
         conn.close()
 
+@app.delete("/api/markets/{market_id}/members/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def leave_market(market_id: int, user_id: str):
+    """Allows a user to leave a market they are a member of."""
+    conn = get_dict_connection()
+    try:
+        with conn.cursor() as c:
+            # Check if the user is the creator. For now, we might prevent creators from leaving.
+            # A better long-term solution would be to force them to transfer ownership.
+            c.execute("SELECT creator_id FROM markets WHERE id = %s", (market_id,))
+            market = c.fetchone()
+            if market and market['creator_id'] == user_id:
+                raise HTTPException(status_code=403, detail="Market creators cannot leave their own market. Please delete it instead.")
+
+            # Delete the user's membership record.
+            # The 'RETURNING *' part is a good way to check if a row was actually deleted.
+            c.execute("DELETE FROM market_members WHERE market_id = %s AND user_id = %s RETURNING *", (market_id, user_id))
+            if c.fetchone() is None:
+                # This means the user wasn't a member in the first place, which is fine.
+                pass
+            
+            conn.commit()
+            return
+    except Exception as e:
+        if conn: conn.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        if conn: conn.close()
+
+@app.delete("/api/markets/{market_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_market(market_id: int, delete_data: MarketDelete):
+    """
+    Deletes an entire market. This action can only be performed by the market's creator.
+    """
+    conn = get_dict_connection()
+    try:
+        with conn.cursor() as c:
+            # --- SECURITY CHECK: Verify the user is the creator ---
+            c.execute("SELECT creator_id FROM markets WHERE id = %s", (market_id,))
+            market = c.fetchone()
+
+            if not market:
+                # Market doesn't exist, which is fine. The end result is the same.
+                return 
+
+            if market['creator_id'] != delete_data.user_id:
+                # If the user is not the creator, forbid the action.
+                raise HTTPException(status_code=403, detail="Only the market creator can delete this market.")
+            
+            # If the check passes, proceed with deletion.
+            # The database's ON DELETE CASCADE rules will handle the rest.
+            c.execute("DELETE FROM markets WHERE id = %s", (market_id,))
+            conn.commit()
+            
+            print(f"User {delete_data.user_id} successfully deleted market {market_id}.")
+            return
+
+    except Exception as e:
+        if conn: conn.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        if conn: conn.close()
 
 # --- NEW: Market-aware read-only endpoints ---
 @app.get("/api/markets/{market_id}/stocks")
