@@ -258,7 +258,7 @@ const MarketOverview = () => {
                   +{marketStats.topGainer.price_change_percent_24h.toFixed(2)}%
                 </div>
                 <p className="text-xs text-muted-foreground">
-                  {marketStats.topGainer.player_tag} ({marketStats.topGainer.champion})
+                  {marketStats.topGainer.player_tag} ({marketStats.topGainer.champions?.join(', ') || 'No champions'})
                 </p>
               </>
             ) : (
@@ -299,22 +299,33 @@ const MarketOverview = () => {
           <div className="space-y-4">
             {stocks.map((stock) => (
               <div 
-                key={`${stock.player_tag}-${stock.champion}`}
+                key={stock.player_tag}
                 className="flex items-center justify-between p-4 rounded-lg border hover:bg-gray-50 cursor-pointer transition-colors"
                 onClick={() => router.push(`/market/${currentMarket.id}/player/${encodeURIComponent(stock.player_tag)}`)}
               >
                 <div className="flex items-center space-x-3">
-                  <img 
-                    src={`/champions/${stock.champion.toLowerCase()}.png`}
-                    alt={stock.champion}
-                    className="w-10 h-10 rounded-full object-cover"
-                    onError={(e) => { 
-                      e.currentTarget.src = '/champions/default.png';
-                    }}
-                  />
+                  <div className="flex -space-x-2">
+                    {stock.champions.slice(0, 3).map((champion, index) => (
+                      <img 
+                        key={champion}
+                        src={`/champions/${champion.toLowerCase()}.png`}
+                        alt={champion}
+                        className="w-10 h-10 rounded-full object-cover border-2 border-white"
+                        style={{ zIndex: stock.champions.length - index }}
+                        onError={(e) => { 
+                          e.currentTarget.src = '/champions/default.png';
+                        }}
+                      />
+                    ))}
+                    {stock.champions.length > 3 && (
+                      <div className="w-10 h-10 rounded-full bg-gray-200 border-2 border-white flex items-center justify-center text-xs font-semibold text-gray-600">
+                        +{stock.champions.length - 3}
+                      </div>
+                    )}
+                  </div>
                   <div>
                     <h3 className="font-semibold">{stock.player_tag}</h3>
-                    <p className="text-sm text-gray-600">{stock.champion}</p>
+                    <p className="text-sm text-gray-600">{stock.champions.join(', ')}</p>
                   </div>
                 </div>
                 

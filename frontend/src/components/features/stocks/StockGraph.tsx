@@ -12,31 +12,38 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
 interface StockGraphProps {
   playerTag: string;
-  champion: string;
 }
 
-interface StockDataPoint { stock_value: number; timestamp: string; }
-interface ModelScore { model_score: number; timestamp: string; stock_value: number; previous_stock_value: number | null; price_change: number; formatted_time: string; }
+interface PlayerData {
+  player_tag: string;
+  champions: string[];
+}
+
+interface StockDataPoint { stock_value: number; timestamp: string; champion_played?: string; }
+interface ModelScore { model_score: number; timestamp: string; stock_value: number; previous_stock_value: number | null; price_change: number; formatted_time: string; champion_played?: string; }
 
 // Global singleton variables to prevent re-initialization during navigation
 let hasStockGraphRenderedBefore = false;
 let cachedStockHistory: StockDataPoint[] = [];
 let cachedStockScores: ModelScore[] = [];
+let cachedPlayerData: PlayerData | null = null;
 let cachedPlayerTag = '';
-let cachedChampion = '';
 
-const StockGraph = ({ playerTag, champion }: StockGraphProps) => {
+const StockGraph = ({ playerTag }: StockGraphProps) => {
   const { currentMarket, initialized: marketInitialized } = useMarket();
   const [period, setPeriod] = useState('1w');
   const [history, setHistory] = useState<StockDataPoint[]>(
-    (cachedPlayerTag === playerTag && cachedChampion === champion) ? cachedStockHistory : []
+    (cachedPlayerTag === playerTag) ? cachedStockHistory : []
   );
   const [scores, setScores] = useState<ModelScore[]>(
-    (cachedPlayerTag === playerTag && cachedChampion === champion) ? cachedStockScores : []
+    (cachedPlayerTag === playerTag) ? cachedStockScores : []
+  );
+  const [playerData, setPlayerData] = useState<PlayerData | null>(
+    (cachedPlayerTag === playerTag) ? cachedPlayerData : null
   );
   const [loading, setLoading] = useState(false);
   const [initialized, setInitialized] = useState(
-    hasStockGraphRenderedBefore && cachedPlayerTag === playerTag && cachedChampion === champion
+    hasStockGraphRenderedBefore && cachedPlayerTag === playerTag
   );
 
   // Using useCallback to memoize the fetch function
@@ -45,7 +52,7 @@ const StockGraph = ({ playerTag, champion }: StockGraphProps) => {
     if (!marketInitialized) return;
 
     // Wait until we have all the necessary pieces of information
-    if (!currentMarket || !playerTag || !champion) {
+    if (!currentMarket || !playerTag) {
         setLoading(false);
         setInitialized(true);
         hasStockGraphRenderedBefore = true;
@@ -60,45 +67,58 @@ const StockGraph = ({ playerTag, champion }: StockGraphProps) => {
     try {
         const encodedPlayerTag = encodeURIComponent(playerTag); // Ensure tag is URL-safe
 
-        // --- CORRECT API ENDPOINTS ---
-        const historyUrl = `${API_URL}/api/markets/${currentMarket.id}/stocks/${encodedPlayerTag}/${champion}/history?period=${period}`;
-        const scoresUrl = `${API_URL}/api/markets/${currentMarket.id}/stocks/${encodedPlayerTag}/${champion}/scores`;
+        // --- UPDATED API ENDPOINTS FOR PLAYER-BASED STOCKS ---
+        const historyUrl = `${API_URL}/api/markets/${currentMarket.id}/stocks/${encodedPlayerTag}/history?period=${period}`;
+        const scoresUrl = `${API_URL}/api/markets/${currentMarket.id}/stocks/${encodedPlayerTag}/scores`;
+        const stocksUrl = `${API_URL}/api/markets/${currentMarket.id}/stocks`; // To get champions data
         
         console.log("Fetching history from:", historyUrl); // Debug log
         console.log("Fetching scores from:", scoresUrl);   // Debug log
+        console.log("Fetching stocks from:", stocksUrl);   // Debug log
 
         const historyPromise = fetch(historyUrl);
         const scoresPromise = fetch(scoresUrl);
+        const stocksPromise = fetch(stocksUrl);
 
-        const [historyResponse, scoresResponse] = await Promise.all([historyPromise, scoresPromise]);
+        const [historyResponse, scoresResponse, stocksResponse] = await Promise.all([historyPromise, scoresPromise, stocksPromise]);
 
         if (!historyResponse.ok) throw new Error(`Failed to fetch stock history (${historyResponse.status})`);
         if (!scoresResponse.ok) throw new Error(`Failed to fetch recent scores (${scoresResponse.status})`);
+        if (!stocksResponse.ok) throw new Error(`Failed to fetch stocks data (${stocksResponse.status})`);
 
         const historyData = await historyResponse.json();
         const scoresData = await scoresResponse.json();
+        const stocksData = await stocksResponse.json();
+
+        // Find the current player's data from the stocks response
+        const currentPlayerData = stocksData.find((stock: any) => stock.player_tag === playerTag);
+        
+        console.log("Player data for", playerTag, ":", currentPlayerData); // Debug log
+        console.log("All stocks data:", stocksData); // Debug log
 
         setHistory(historyData || []); // Ensure we always have an array
         setScores(scoresData || []);   // Ensure we always have an array
+        setPlayerData(currentPlayerData || { player_tag: playerTag, champions: [] });
 
         // Cache the data
         cachedStockHistory = historyData || [];
         cachedStockScores = scoresData || [];
+        cachedPlayerData = currentPlayerData || { player_tag: playerTag, champions: [] };
         cachedPlayerTag = playerTag;
-        cachedChampion = champion;
 
     } catch (error) {
         console.error("Error fetching stock details:", error);
         if (!hasStockGraphRenderedBefore) {
           setHistory([]); // Reset to empty on error
           setScores([]);  // Reset to empty on error
+          setPlayerData(null);
         }
     } finally {
         setLoading(false);
         setInitialized(true);
         hasStockGraphRenderedBefore = true;
     }
-  }, [currentMarket, playerTag, champion, period, marketInitialized, initialized]);
+  }, [currentMarket, playerTag, period, marketInitialized, initialized]);
 
   useEffect(() => {
     fetchData();
@@ -118,19 +138,42 @@ const StockGraph = ({ playerTag, champion }: StockGraphProps) => {
   const priceChange = currentPrice - startPrice;
   const priceChangePercent = startPrice && startPrice > 0 ? (priceChange / startPrice) * 100 : 0;
 
+  // Debug log to see current playerData state
+  console.log("Current playerData in render:", playerData);
+
   return (
     <div className="p-8 space-y-6">
       <Card>
-        <CardHeader className="flex flex-row items-center space-x-4">
-            <img
-              src={`/champions/${champion.toLowerCase()}.png`}
-              alt={champion}
-              className="w-20 h-20 rounded-lg object-cover shadow-xl"
-              onError={(e) => { e.currentTarget.src = '/champions/default.png'; }}
-            />
-            <div>
+        <CardHeader className="flex flex-col space-y-4">
+            <div className="flex flex-col items-center space-y-3">
                 <CardTitle className="text-2xl">{playerTag}</CardTitle>
-                <p className="text-lg text-muted-foreground">{champion}</p>
+                <div className="flex flex-wrap gap-3 justify-center">
+                  {playerData && playerData.champions.length > 0 ? (
+                    playerData.champions.map((champion, index) => (
+                      <img
+                        key={champion}
+                        src={`/champions/${champion.toLowerCase()}.png`}
+                        alt={champion}
+                        className="w-16 h-16 rounded-lg object-cover shadow-lg border-2 border-white"
+                        onError={(e) => { 
+                          e.currentTarget.src = '/champions/default.png';
+                        }}
+                      />
+                    ))
+                  ) : (
+                    <img
+                      src={`/champions/default.png`}
+                      alt={playerTag}
+                      className="w-16 h-16 rounded-lg object-cover shadow-lg"
+                    />
+                  )}
+                </div>
+                <p className="text-lg text-muted-foreground text-center">
+                  {playerData && playerData.champions.length > 0 
+                    ? playerData.champions.join(', ') 
+                    : 'Player Stock'
+                  }
+                </p>
             </div>
         </CardHeader>
         <CardContent>
@@ -190,6 +233,11 @@ const StockGraph = ({ playerTag, champion }: StockGraphProps) => {
                                                 <CalendarIcon className="h-4 w-4 mr-1.5" />
                                                 {timestamp}
                                             </div>
+                                            {score?.champion_played && (
+                                                <div className="text-xs text-blue-600 mt-0.5">
+                                                    Played as {score.champion_played}
+                                                </div>
+                                            )}
                                         </div>
                                         <div className="text-right">
                                             <p className="font-semibold">${stockValue.toFixed(2)}</p>

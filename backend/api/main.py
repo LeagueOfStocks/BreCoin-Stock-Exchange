@@ -679,9 +679,9 @@ async def get_market_stocks(market_id: int):
         if conn: conn.close()
 
 
-@app.get("/api/markets/{market_id}/stocks/{player_tag}/{champion}/history")
-async def get_stock_history(market_id: int, player_tag: str, champion: str, period: str = "1w"):
-    """Gets stock price history for a specific stock within a market."""
+@app.get("/api/markets/{market_id}/stocks/{player_tag}/history")
+async def get_stock_history(market_id: int, player_tag: str, period: str = "1w"):
+    """Gets stock price history for a specific player within a market."""
     conn = get_dict_connection()
     try:
         now = datetime.now()
@@ -693,11 +693,11 @@ async def get_stock_history(market_id: int, player_tag: str, champion: str, peri
         
         with conn.cursor() as c:
             c.execute("""
-                SELECT stock_value, timestamp
+                SELECT stock_value, timestamp, champion_played
                 FROM stock_values
-                WHERE market_id = %s AND player_tag = %s AND champion = %s AND timestamp >= %s
+                WHERE market_id = %s AND player_tag = %s AND timestamp >= %s
                 ORDER BY timestamp ASC
-            """, (market_id, player_tag, champion, start_date))
+            """, (market_id, player_tag, start_date))
             return c.fetchall()
     finally:
         conn.close()
@@ -714,33 +714,32 @@ async def get_top_performers(market_id: int, period: str = "1m"):
         else: start_date = now - timedelta(days=30) # Default to 1 month
 
         with conn.cursor() as c:
-            # A single, powerful query to get all performance data at once
+            # Updated query for player-based stocks
             c.execute("""
-                WITH stock_list AS (
-                    SELECT DISTINCT player_tag, champion FROM stock_values WHERE market_id = %(market_id)s
+                WITH player_list AS (
+                    SELECT DISTINCT player_tag FROM stock_values WHERE market_id = %(market_id)s
                 ),
                 latest_prices AS (
-                    SELECT DISTINCT ON (player_tag, champion)
-                        player_tag, champion, stock_value
+                    SELECT DISTINCT ON (player_tag)
+                        player_tag, stock_value
                     FROM stock_values
                     WHERE market_id = %(market_id)s
-                    ORDER BY player_tag, champion, timestamp DESC
+                    ORDER BY player_tag, timestamp DESC
                 ),
                 historical_prices AS (
-                    SELECT DISTINCT ON (player_tag, champion)
-                        player_tag, champion, stock_value
+                    SELECT DISTINCT ON (player_tag)
+                        player_tag, stock_value
                     FROM stock_values
                     WHERE market_id = %(market_id)s AND timestamp >= %(start_date)s
-                    ORDER BY player_tag, champion, timestamp ASC
+                    ORDER BY player_tag, timestamp ASC
                 )
                 SELECT
-                    sl.player_tag,
-                    sl.champion,
+                    pl.player_tag,
                     lp.stock_value as current_price,
                     (lp.stock_value - hp.stock_value) / hp.stock_value * 100 AS price_change_percent
-                FROM stock_list sl
-                JOIN latest_prices lp ON sl.player_tag = lp.player_tag AND sl.champion = lp.champion
-                JOIN historical_prices hp ON sl.player_tag = hp.player_tag AND sl.champion = hp.champion
+                FROM player_list pl
+                JOIN latest_prices lp ON pl.player_tag = lp.player_tag
+                JOIN historical_prices hp ON pl.player_tag = hp.player_tag
                 WHERE hp.stock_value > 0;
             """, {'market_id': market_id, 'start_date': start_date})
 
@@ -762,23 +761,23 @@ async def get_top_performers(market_id: int, period: str = "1m"):
     finally:
         conn.close()
 
-@app.get("/api/markets/{market_id}/stocks/{player_tag}/{champion}/scores")
-async def get_player_scores(market_id: int, player_tag: str, champion: str, limit: int = 5):
-    """Gets the most recent game scores for a specific stock within a market."""
+@app.get("/api/markets/{market_id}/stocks/{player_tag}/scores")
+async def get_player_scores(market_id: int, player_tag: str, limit: int = 5):
+    """Gets the most recent game scores for a specific player within a market."""
     conn = get_dict_connection()
     try:
         with conn.cursor() as c:
             c.execute("""
-                SELECT sv1.model_score, sv1.timestamp, sv1.game_id, sv1.stock_value,
+                SELECT sv1.model_score, sv1.timestamp, sv1.game_id, sv1.stock_value, sv1.champion_played,
                        (SELECT sv2.stock_value FROM stock_values sv2 
                         WHERE sv2.market_id = sv1.market_id AND sv2.player_tag = sv1.player_tag 
-                        AND sv2.champion = sv1.champion AND sv2.timestamp < sv1.timestamp 
+                        AND sv2.timestamp < sv1.timestamp 
                         ORDER BY sv2.timestamp DESC LIMIT 1) as previous_stock_value
                 FROM stock_values sv1
-                WHERE sv1.market_id = %s AND sv1.player_tag = %s AND sv1.champion = %s AND sv1.model_score IS NOT NULL
+                WHERE sv1.market_id = %s AND sv1.player_tag = %s AND sv1.model_score IS NOT NULL
                 ORDER BY sv1.timestamp DESC
                 LIMIT %s
-            """, (market_id, player_tag, champion, limit))
+            """, (market_id, player_tag, limit))
             return c.fetchall()
     finally:
         conn.close()

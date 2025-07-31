@@ -12,7 +12,7 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 // This interface matches the output of our new /api/markets/{id}/stocks endpoint
 interface Stock {
   player_tag: string;
-  champion: string;
+  champions: string[];
   current_price: number;
   price_change_24h: number; // The raw change value
   price_change_percent_24h: number; // The percentage change
@@ -96,10 +96,9 @@ export default function GraphIndexPage() {
       {stocks.length > 0 ? (
         <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
             {stocks.map((stock) => (
-                // IMPORTANT: The link now needs to pass champion info, we'll use a query parameter.
                 <Link 
-                    key={`${stock.player_tag}-${stock.champion}`}
-                    href={`/graph/${encodeURIComponent(stock.player_tag)}?champion=${stock.champion}`}
+                    key={stock.player_tag}
+                    href={`/graph/${encodeURIComponent(stock.player_tag)}`}
                 >
                     <Card className="hover:shadow-lg hover:scale-[1.02] transition-all duration-200">
                     <CardHeader className="pb-2">
@@ -112,16 +111,21 @@ export default function GraphIndexPage() {
                     </CardHeader>
                     <CardContent>
                         <div className="space-y-4">
-                            <div className="flex items-center gap-3">
-                                <img 
-                                    src={`/champions/${stock.champion.toLowerCase()}.png`}
-                                    alt={stock.champion}
-                                    className="h-14 w-14 object-cover rounded-md"
-                                    onError={(e) => { e.currentTarget.src = '/champions/default.png'; }}
-                                />
-                                <div>
-                                    <p className="text-sm text-gray-500">Champion</p>
-                                    <p className="font-medium text-gray-900">{stock.champion}</p>
+                            <div className="flex flex-col gap-3">
+                                <div className="flex flex-wrap gap-2 justify-center">
+                                    {stock.champions.map((champion, index) => (
+                                        <img 
+                                            key={champion}
+                                            src={`/champions/${champion.toLowerCase()}.png`}
+                                            alt={champion}
+                                            className="h-12 w-12 object-cover rounded-md border-2 border-white shadow-sm"
+                                            onError={(e) => { e.currentTarget.src = '/champions/default.png'; }}
+                                        />
+                                    ))}
+                                </div>
+                                <div className="text-center">
+                                    <p className="text-sm text-gray-500">Champions</p>
+                                    <p className="font-medium text-gray-900 text-sm">{stock.champions.join(', ')}</p>
                                 </div>
                             </div>
                             <div className="flex justify-between items-end pt-1 border-t">

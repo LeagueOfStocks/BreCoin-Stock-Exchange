@@ -4,12 +4,11 @@ interface PageProps {
     params: Promise<{
         marketId: string;
         playerTag: string;
-        champion: string;
     }>
 }
 
 export default async function StockDetailPage({ params }: PageProps) {
-    const { marketId, playerTag, champion } = await params;
+    const { marketId, playerTag } = await params;
     const decodedPlayerTag = decodeURIComponent(playerTag);
 
     // The page's only job is to get params from the URL
@@ -18,7 +17,6 @@ export default async function StockDetailPage({ params }: PageProps) {
         <div>
             <StockGraph 
                 playerTag={decodedPlayerTag}
-                champion={champion}
             />
         </div>
     );
