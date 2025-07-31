@@ -181,10 +181,10 @@ const MarketOverview = () => {
           You need to select or create a market to view stock data.
         </p>
         <Button 
-          onClick={() => router.push('/selector_lobby')}
+          onClick={() => router.push('/markets')}
           className="bg-blue-600 hover:bg-blue-700"
         >
-          Create or Join Market
+          Manage Your Markets
         </Button>
       </div>
     );

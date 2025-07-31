@@ -739,11 +739,16 @@ async def get_user_markets(user_id: str):
         with conn.cursor() as c:
             print("[DB] Executing query to find markets...")
             c.execute("""
-                SELECT m.id, m.name
+                SELECT 
+                    m.id, 
+                    m.name, 
+                    m.creator_id,
+                    CASE WHEN m.creator_id = %s THEN m.invite_code ELSE NULL END as invite_code,
+                    (SELECT COUNT(*) FROM market_members WHERE market_id = m.id) as member_count
                 FROM markets m
                 JOIN market_members mm ON m.id = mm.market_id
                 WHERE mm.user_id = %s
-            """, (user_id,))
+            """, (user_id, user_id))
             markets = c.fetchall()
             # This is correct. If the user is in no markets, fetchall() will return an empty list: []
             print(f"[DB] Query finished. Found {len(markets)} markets.")
@@ -817,5 +822,19 @@ async def remove_player_from_market(player_id: int):
             c.execute("DELETE FROM market_players WHERE id = %s", (player_id,))
             conn.commit()
             return
+    finally:
+        conn.close()
+
+@app.get("/api/users/{user_id}/profile")
+async def get_user_profile(user_id: str):
+    """Gets user profile information including subscription tier."""
+    conn = get_dict_connection()
+    try:
+        with conn.cursor() as c:
+            c.execute("SELECT id, username, subscription_tier FROM profiles WHERE id = %s", (user_id,))
+            profile = c.fetchone()
+            if not profile:
+                raise HTTPException(status_code=404, detail="User profile not found")
+            return profile
     finally:
         conn.close()

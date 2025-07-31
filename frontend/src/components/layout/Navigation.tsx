@@ -41,6 +41,9 @@ const Navigation = () => {
                 <Link href="/top" className={getLinkClassName('/top')}>
                   Top Stocks
                 </Link>
+                <Link href="/markets" className={getLinkClassName('/markets')}>
+                  Your Markets
+                </Link>
               </div>
             )}
           </div>
