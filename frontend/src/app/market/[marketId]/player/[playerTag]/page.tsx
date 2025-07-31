@@ -1,15 +1,15 @@
 import StockGraph from "@/components/features/stocks/StockGraph"; // <-- Import the component
 
 interface PageProps {
-    params: {
+    params: Promise<{
         marketId: string;
         playerTag: string;
         champion: string;
-    }
+    }>
 }
 
-export default function StockDetailPage({ params }: PageProps) {
-    const { marketId, playerTag, champion } = params;
+export default async function StockDetailPage({ params }: PageProps) {
+    const { marketId, playerTag, champion } = await params;
     const decodedPlayerTag = decodeURIComponent(playerTag);
 
     // The page's only job is to get params from the URL

@@ -397,16 +397,26 @@ export default function MarketManagementPage({ marketId }: MarketManagementPageP
                                         </Badge>
                                     ))}
                                 </div>
+                                {/* --- THIS IS THE NEW, MISSING FORM --- */}
                                 {isCreator && player.champions.length < marketDetails.champions_per_player_limit && (
-                                    <form onSubmit={(e) => { e.preventDefault(); handleAddChampion(player.id); }} className="flex gap-2 mt-4">
+                                    <form 
+                                        onSubmit={(e) => { 
+                                            e.preventDefault(); 
+                                            handleAddChampion(player.id); 
+                                        }} 
+                                        className="flex gap-2 mt-4"
+                                    >
                                         <Input 
                                             placeholder="Add champion to pool..." 
                                             value={newChampionInputs[player.id] || ''} 
                                             onChange={(e) => setNewChampionInputs(prev => ({...prev, [player.id]: e.target.value}))} 
                                         />
-                                        <Button type="submit" size="sm">Add</Button>
+                                        <Button type="submit" size="sm">
+                                            <PlusCircle className="h-4 w-4" />
+                                        </Button>
                                     </form>
                                 )}
+                                {/* --- END OF NEW FORM --- */}
                             </div>
                         ))}
                     </div>

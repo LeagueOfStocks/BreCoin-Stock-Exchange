@@ -13,7 +13,7 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
 interface Stock {
     player_tag: string;
-    champion: string;
+    champions: string[]; 
     current_price: number;
     price_change_24h: number;
     price_change_percent_24h: number;
@@ -301,7 +301,7 @@ const MarketOverview = () => {
               <div 
                 key={`${stock.player_tag}-${stock.champion}`}
                 className="flex items-center justify-between p-4 rounded-lg border hover:bg-gray-50 cursor-pointer transition-colors"
-                onClick={() => router.push(`/graph/${encodeURIComponent(stock.player_tag)}?champion=${stock.champion}`)}
+                onClick={() => router.push(`/market/${currentMarket.id}/player/${encodeURIComponent(stock.player_tag)}`)}
               >
                 <div className="flex items-center space-x-3">
                   <img 

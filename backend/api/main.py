@@ -400,21 +400,14 @@ async def add_player_to_market(market_id: int, player_data: PlayerAdd):
             # Step 3: Create the initial "IPO" price entry in the stock_values table
             c.execute("""
                 INSERT INTO stock_values 
-                    (market_id, market_player_id, player_tag, champion, stock_value, model_score) 
-                VALUES 
-                    (%s, %s, %s, %s, %s, %s)
+                    (market_id, market_player_id, player_tag, stock_value, model_score, champion_played) 
+                VALUES (%s, %s, %s, %s, %s, %s)
             """, 
-            (
-                market_id, 
-                market_player_id,  # <-- Now this matches the variable name
-                player_data.player_tag, 
-                player_data.initial_champion, 
-                10.0, # Default price
-                5.0   # Default score
-            ))
+            (market_id, market_player_id, player_data.player_tag, 10.0, 5.0, player_data.initial_champion))
             
             conn.commit()
-            return {"status": "success", "player_id": market_player_id}  # <-- Use correct variable
+            return {"status": "success", "player_id": market_player_id}
+
             
     except Exception as e:
         if conn: conn.rollback()
@@ -611,8 +604,8 @@ async def delete_market(market_id: int, delete_data: MarketDelete):
 @app.get("/api/markets/{market_id}/stocks")
 async def get_market_stocks(market_id: int):
     """
-    Gets all stocks for a market, including current price and 24h/7d changes.
-    This is now a powerful query to feed the main market overview table.
+    Gets all PLAYERS for a market, including their champion pool, 
+    current price, and historical changes.
     """
     conn = get_dict_connection()
     try:
@@ -620,52 +613,71 @@ async def get_market_stocks(market_id: int):
             now = datetime.now(timezone.utc)
             day_ago = now - timedelta(days=1)
             week_ago = now - timedelta(days=7)
-
-            # This complex query uses Common Table Expressions (CTEs) to get everything in one go.
+            
+            # This complex query gets all the data we need in one go.
             c.execute("""
-                WITH latest_prices AS (
-                    SELECT 
-                        player_tag, 
-                        champion, 
-                        stock_value,
-                        timestamp,
-                        ROW_NUMBER() OVER(PARTITION BY player_tag, champion ORDER BY timestamp DESC) as rn
+                WITH player_champion_list AS (
+                    -- First, get every player in the market and their full champion pool
+                    SELECT mp.id, mp.player_tag, array_agg(pc.champion_name) as champions
+                    FROM market_players mp
+                    JOIN player_champions pc ON mp.id = pc.market_player_id
+                    WHERE mp.market_id = %(market_id)s
+                    GROUP BY mp.id, mp.player_tag
+                ),
+                latest_prices AS (
+                    -- Then, find the single most recent price for each player
+                    SELECT DISTINCT ON (market_player_id)
+                        market_player_id, stock_value, timestamp
                     FROM stock_values
                     WHERE market_id = %(market_id)s
+                    ORDER BY market_player_id, timestamp DESC
                 ),
                 prices_24h_ago AS (
-                    SELECT DISTINCT ON (player_tag, champion)
-                        player_tag, champion, stock_value
+                    -- Find the latest price from before 24 hours ago
+                    SELECT DISTINCT ON (market_player_id)
+                        market_player_id, stock_value
                     FROM stock_values
                     WHERE market_id = %(market_id)s AND timestamp <= %(day_ago)s
-                    ORDER BY player_tag, champion, timestamp DESC
+                    ORDER BY market_player_id, timestamp DESC
                 ),
                 prices_7d_ago AS (
-                    SELECT DISTINCT ON (player_tag, champion)
-                        player_tag, champion, stock_value
+                    -- Find the latest price from before 7 days ago
+                    SELECT DISTINCT ON (market_player_id)
+                        market_player_id, stock_value
                     FROM stock_values
                     WHERE market_id = %(market_id)s AND timestamp <= %(week_ago)s
-                    ORDER BY player_tag, champion, timestamp DESC
+                    ORDER BY market_player_id, timestamp DESC
                 )
-                SELECT 
-                    lp.player_tag,
-                    lp.champion,
+                SELECT
+                    pcl.player_tag,
+                    pcl.champions,
                     lp.stock_value AS current_price,
+                    lp.timestamp AS last_update,
+                    -- Safely calculate price changes, defaulting to 0 if no historical data exists
                     lp.stock_value - COALESCE(p24h.stock_value, lp.stock_value) AS price_change_24h,
-                    (lp.stock_value - COALESCE(p24h.stock_value, lp.stock_value)) / COALESCE(p24h.stock_value, lp.stock_value) * 100 AS price_change_percent_24h,
+                    (lp.stock_value - COALESCE(p24h.stock_value, lp.stock_value)) / NULLIF(COALESCE(p24h.stock_value, lp.stock_value), 0) * 100 AS price_change_percent_24h,
                     lp.stock_value - COALESCE(p7d.stock_value, lp.stock_value) AS price_change_7d,
-                    (lp.stock_value - COALESCE(p7d.stock_value, lp.stock_value)) / COALESCE(p7d.stock_value, lp.stock_value) * 100 AS price_change_percent_7d,
-                    lp.timestamp AS last_update
-                FROM latest_prices lp
-                LEFT JOIN prices_24h_ago p24h ON lp.player_tag = p24h.player_tag AND lp.champion = p24h.champion
-                LEFT JOIN prices_7d_ago p7d ON lp.player_tag = p7d.player_tag AND lp.champion = p7d.champion
-                WHERE lp.rn = 1;
+                    (lp.stock_value - COALESCE(p7d.stock_value, lp.stock_value)) / NULLIF(COALESCE(p7d.stock_value, lp.stock_value), 0) * 100 AS price_change_percent_7d
+                FROM player_champion_list pcl
+                -- Use LEFT JOINs to ensure players appear even if they only have an IPO price
+                LEFT JOIN latest_prices lp ON pcl.id = lp.market_player_id
+                LEFT JOIN prices_24h_ago p24h ON pcl.id = p24h.market_player_id
+                LEFT JOIN prices_7d_ago p7d ON pcl.id = p7d.market_player_id;
             """, {'market_id': market_id, 'day_ago': day_ago, 'week_ago': week_ago})
             
             stocks = c.fetchall()
+            # Handle nulls from the LEFT JOIN for brand new stocks
+            for stock in stocks:
+                if stock['current_price'] is None: stock['current_price'] = 10.0
+                if stock['price_change_24h'] is None: stock['price_change_24h'] = 0
+                if stock['price_change_percent_24h'] is None: stock['price_change_percent_24h'] = 0
+                if stock['price_change_7d'] is None: stock['price_change_7d'] = 0
+                if stock['price_change_percent_7d'] is None: stock['price_change_percent_7d'] = 0
+
             return stocks
     finally:
-        conn.close()
+        if conn: conn.close()
+
 
 @app.get("/api/markets/{market_id}/stocks/{player_tag}/{champion}/history")
 async def get_stock_history(market_id: int, player_tag: str, champion: str, period: str = "1w"):
