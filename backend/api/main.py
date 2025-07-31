@@ -483,20 +483,67 @@ async def kick_user_from_market(market_id: int, kick_data: KickUser):
         if conn: conn.close()
 
 
+
 @app.post("/api/markets/players/{player_id}/champions", status_code=status.HTTP_201_CREATED)
 async def add_champion_to_player(player_id: int, champion_data: ChampionAdd):
-    # TODO: Implement validation against market's champions_per_player_limit
+    """Adds a new champion to a player's allowed pool, respecting tier limits."""
     conn = get_dict_connection()
     try:
         with conn.cursor() as c:
+            # --- TIER VALIDATION LOGIC ---
+            # 1. Get the market's tier and champion limit from the player_id
+            c.execute("""
+                SELECT 
+                    m.champions_per_player_limit,
+                    (SELECT COUNT(*) FROM player_champions WHERE market_player_id = %s) as current_champion_count
+                FROM market_players mp
+                JOIN markets m ON mp.market_id = m.id
+                WHERE mp.id = %s
+            """, (player_id, player_id))
+            
+            market_rules = c.fetchone()
+            if not market_rules:
+                raise HTTPException(status_code=404, detail="Player or market not found.")
+
+            # 2. Enforce the limit
+            if market_rules['current_champion_count'] >= market_rules['champions_per_player_limit']:
+                raise HTTPException(status_code=403, detail=f"This player has reached the maximum number of champions ({market_rules['champions_per_player_limit']}) allowed by this market's tier.")
+
+            # --- END VALIDATION ---
+            
+            # If validation passes, insert the new champion
             c.execute("INSERT INTO player_champions (market_player_id, champion_name) VALUES (%s, %s)",
                       (player_id, champion_data.champion_name))
             conn.commit()
-            return {"status": "success"}
+            return {"status": "success", "message": f"{champion_data.champion_name} added to pool."}
     except Exception as e:
+        if conn: conn.rollback()
+        # Handle cases where the champion is already in the pool
+        if 'duplicate key value violates unique constraint' in str(e).lower():
+            raise HTTPException(status_code=409, detail="This champion is already in the player's pool.")
         raise HTTPException(status_code=500, detail=str(e))
     finally:
-        conn.close()
+        if conn: conn.close()
+
+@app.delete("/api/markets/players/{player_id}/champions/{champion_name}", status_code=status.HTTP_204_NO_CONTENT)
+async def remove_champion_from_player(player_id: int, champion_name: str):
+    """Removes a champion from a player's allowed pool."""
+    # TODO: Add security check to ensure the user making the request is the market creator
+    conn = get_dict_connection()
+    try:
+        with conn.cursor() as c:
+            # A player must always have at least one champion
+            c.execute("SELECT COUNT(*) FROM player_champions WHERE market_player_id = %s", (player_id,))
+            count = c.fetchone()['count']
+            if count <= 1:
+                raise HTTPException(status_code=400, detail="Cannot remove the last champion from a player's pool.")
+
+            c.execute("DELETE FROM player_champions WHERE market_player_id = %s AND champion_name = %s",
+                      (player_id, champion_name))
+            conn.commit()
+            return
+    finally:
+        if conn: conn.close()
 
 @app.delete("/api/markets/{market_id}/members/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def leave_market(market_id: int, user_id: str):

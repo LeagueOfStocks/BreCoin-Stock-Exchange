@@ -10,7 +10,7 @@ import { Input } from '@/components/ui/input';
 import { useToast } from '@/hooks/use-toast';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Badge } from '@/components/ui/badge';
-import { Copy, Trash2, Users, UserX } from 'lucide-react';
+import { Copy, PlusCircle, Trash2, Users, UserX, X } from 'lucide-react';
 import {
   Dialog,
   DialogContent,
@@ -160,6 +160,22 @@ export default function MarketManagementPage({ marketId }: MarketManagementPageP
          } catch (error: any) {
              toast({ variant: 'destructive', title: 'Error adding champion', description: error.message });
          }
+    };
+
+    const handleRemoveChampion = async (playerId: number, championName: string) => {
+        try {
+            const response = await fetch(`${API_URL}/api/markets/players/${playerId}/champions/${championName}`, {
+                method: 'DELETE',
+            });
+            if (!response.ok) {
+                 const result = await response.json();
+                 throw new Error(result.detail || 'Failed to remove champion');
+            }
+            toast({ title: 'Champion Removed', description: `${championName} has been removed from the pool.` });
+            fetchMarketDetails(); // Refresh the data to show the change
+        } catch (error: any) {
+            toast({ variant: 'destructive', title: 'Error', description: error.message });
+        }
     };
     
     const handleRemovePlayer = async (playerId: number, playerTag: string) => {
@@ -361,13 +377,30 @@ export default function MarketManagementPage({ marketId }: MarketManagementPageP
                                         </Dialog>
                                     )}
                                 </div>
-                                <div className="flex flex-wrap gap-2 mt-2">
-                                    {player.champions.map(champ => <Badge key={champ} variant="outline">{champ}</Badge>)}
+                                <CardDescription>Champion Pool ({player.champions.length} / {marketDetails.champions_per_player_limit})</CardDescription>
+                                
+                                {/* Champion Pool UI */}
+                                <div className="flex flex-wrap items-center gap-2 mt-2">
+                                    {player.champions.map(champ => (
+                                        <Badge key={champ} variant="secondary" className="pl-3">
+                                            {champ}
+                                            {isCreator && (
+                                                <Button
+                                                    variant="ghost"
+                                                    size="icon"
+                                                    className="h-4 w-4 ml-1 rounded-full text-muted-foreground hover:bg-destructive/20 hover:text-destructive"
+                                                    onClick={() => handleRemoveChampion(player.id, champ)}
+                                                >
+                                                    <X className="h-3 w-3" />
+                                                </Button>
+                                            )}
+                                        </Badge>
+                                    ))}
                                 </div>
                                 {isCreator && player.champions.length < marketDetails.champions_per_player_limit && (
                                     <form onSubmit={(e) => { e.preventDefault(); handleAddChampion(player.id); }} className="flex gap-2 mt-4">
                                         <Input 
-                                            placeholder="Add another champion..." 
+                                            placeholder="Add champion to pool..." 
                                             value={newChampionInputs[player.id] || ''} 
                                             onChange={(e) => setNewChampionInputs(prev => ({...prev, [player.id]: e.target.value}))} 
                                         />
