@@ -5,13 +5,25 @@ import os
 
 # --- CRITICAL: This list MUST be identical to the one in your tracker.py ---
 FEATURE_ORDER = [
-    'kda', 'dmg_to_champions_per_min', 'team_damage_share', 'team_gold_share',
-    'gold_diff_15', 'exp_diff_15', 'kill_participation',
-    'objective_damage_per_min', 'team_objective_damage_share',
-    'vision_score_per_min', 'team_vision_score_share', 'gold_diff_per_min', 'exp_diff_per_min',
-    'damage_taken_per_min', 'damage_taken_share',
-    'healing_shielding_allies_per_min','win_loss'
+    'kda',
+    'kill_participation',
+    'team_damage_share',
+    'team_gold_share',
+    'win_loss',
+    'dmg_to_champions_per_min',
+    'gold_diff_15',
+    'exp_diff_15',
+    'objective_damage_per_min',
+    'team_objective_damage_share',
+    'vision_score_per_min',
+    'team_vision_score_share',
+    'damage_taken_per_min',
+    'damage_taken_share',
+    'healing_shielding_allies_per_min',
+    'gold_diff_per_min',
+    'exp_diff_per_min'
 ]
+
 
 def load_models():
     """Loads the 5 specialist model .pkl files from the parent 'backend' directory."""
