@@ -304,7 +304,7 @@ const MarketOverview = () => {
                 onClick={() => router.push(`/market/${currentMarket.id}/player/${encodeURIComponent(stock.player_tag)}`)}
               >
                 <div className="flex items-center space-x-3">
-                  <div className="flex -space-x-2">
+                  <div className="flex -space-x-2 w-44 pr-4 relative">
                     {stock.champions.slice(0, 5).map((champion, index) => (
                       <img 
                         key={champion}
@@ -322,6 +322,7 @@ const MarketOverview = () => {
                         +{stock.champions.length - 5}
                       </div>
                     )}
+                    <div className="absolute right-0 top-1 bottom-1 w-0.5 bg-gray-300/80 rounded-full"></div>
                   </div>
                   <div>
                     <h3 className="font-semibold">{stock.player_tag}</h3>
