@@ -14,8 +14,13 @@ import { Skeleton } from '@/components/ui/skeleton';
 // Define types for our data
 interface Stock {
   player_tag: string;
-  champion: string;
+  champions: string[];
   current_price: number;
+  price_change_24h: number;
+  price_change_percent_24h: number;
+  price_change_7d: number;
+  price_change_percent_7d: number;
+  last_update: string;
 }
 
 interface UserHolding {
@@ -61,19 +66,20 @@ export default function TradePage() {
     const fetchInitialData = async () => {
       try {
         const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
-        // Use the correct view for current prices in the selected market
-        const stocksPromise = supabase
-            .from('current_stock_prices')
-            .select('*')
-            .eq('market_id', currentMarket.id);
-
-        const profilePromise = supabase
+        
+        // Fetch stocks from new backend API
+        const stocksResponse = await fetch(`${API_URL}/api/markets/${currentMarket.id}/stocks`);
+        if (!stocksResponse.ok) {
+          throw new Error(`Failed to fetch stocks: ${stocksResponse.status}`);
+        }
+        const stocksData = await stocksResponse.json();
+        
+        // TODO: Fetch user profile from backend instead of Supabase once endpoint exists
+        const { data: profileData } = await supabase
             .from('profiles')
             .select('gold')
             .eq('id', user.id)
             .single();
-        
-        const [{ data: stocksData }, { data: profileData }] = await Promise.all([stocksPromise, profilePromise]);
 
         if (stocksData) {
           setStocks(stocksData as Stock[]);
@@ -97,19 +103,35 @@ export default function TradePage() {
     if (!selectedStock || !user || !currentMarket) return;
 
     const fetchHoldings = async () => {
-        const { data } = await supabase
-            .from('portfolio_view')
-            .select('current_shares')
-            .eq('user_id', user.id)
-            .eq('market_id', currentMarket.id) // Also filter holdings by market
-            .eq('player_tag', selectedStock.player_tag)
-            .eq('champion', selectedStock.champion) // Be specific
-            .single();
-        
-        setUserHoldings(data);
-    }
+      if (!selectedStock || !user || !currentMarket) return;
+
+      // Querying the transactions table directly gives the most accurate sum
+      // for a specific player across all their champions.
+      const { data, error } = await supabase
+          .from('transactions')
+          .select('transaction_type, shares')
+          .eq('user_id', user.id)
+          .eq('market_id', currentMarket.id)
+          .eq('player_tag', selectedStock.player_tag);
+
+      if (error) {
+          console.error("Error fetching holdings:", error);
+          setUserHoldings(null); // Set to null on error
+          return;
+      }
+
+      // Calculate the total shares by summing buys and subtracting sells
+      const totalShares = data.reduce((acc, tx) => {
+          return tx.transaction_type === 'BUY' ? acc + tx.shares : acc - tx.shares;
+      }, 0);
+      
+      // The setUserHoldings function expects an object like { current_shares: number }
+      setUserHoldings({ current_shares: totalShares });
+    };
+
     fetchHoldings();
-  }, [selectedStock, user, currentMarket]);
+  }, [selectedStock?.player_tag, user?.id, currentMarket?.id]);
+
 
   const handleTrade = async (tradeType: 'BUY' | 'SELL') => {
     if (!user || !selectedStock || !sharesAmount || sharesAmount <= 0 || !currentMarket) return;
@@ -117,12 +139,12 @@ export default function TradePage() {
     setTradeLoading(true);
     const functionName = tradeType === 'BUY' ? 'buy_stock' : 'sell_stock';
     const args = {
-        p_user_id: user.id,
-        p_player_tag: selectedStock.player_tag,
-        p_champion: selectedStock.champion,
-        // The key must match the function's parameter name exactly
-        [tradeType === 'BUY' ? 'p_shares_to_buy' : 'p_shares_to_sell']: sharesAmount
-    };
+      p_user_id: user.id,
+      p_market_id: currentMarket.id, // <-- Add the market_id
+      p_player_tag: selectedStock.player_tag,
+      // The p_champion argument is now completely removed
+      [tradeType === 'BUY' ? 'p_shares_to_buy' : 'p_shares_to_sell']: sharesAmount
+  };
 
     const { error } = await supabase.rpc(functionName, args);
 
@@ -148,8 +170,7 @@ export default function TradePage() {
             .eq('user_id', user.id)
             .eq('market_id', currentMarket.id)
             .eq('player_tag', selectedStock.player_tag)
-            .eq('champion', selectedStock.champion)
-            .single();
+            .single(); // Remove champion filter since it's now player-based
         setUserHoldings(holdingsData)
 
         setSharesAmount(''); // Clear the input
@@ -182,9 +203,22 @@ export default function TradePage() {
               <div className="flex justify-between items-center">
                 <div>
                   <p className="font-semibold">{stock.player_tag}</p>
-                  <p className="text-sm text-muted-foreground">{stock.champion}</p>
+                  <p className="text-sm text-muted-foreground">
+                    {stock.champions.join(', ')}
+                  </p>
+                  <div className="flex items-center gap-2 text-xs">
+                    <span className={`${stock.price_change_24h >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                      {stock.price_change_24h >= 0 ? '+' : ''}{stock.price_change_percent_24h?.toFixed(1)}%
+                    </span>
+                    <span className="text-muted-foreground">24h</span>
+                  </div>
                 </div>
-                <p className="font-bold text-lg">${stock.current_price.toFixed(2)}</p>
+                <div className="text-right">
+                  <p className="font-bold text-lg">${stock.current_price?.toFixed(2) || '10.00'}</p>
+                  <p className={`text-sm ${stock.price_change_24h >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                    {stock.price_change_24h >= 0 ? '+' : ''}${stock.price_change_24h?.toFixed(2) || '0.00'}
+                  </p>
+                </div>
               </div>
             </div>
           ))}
